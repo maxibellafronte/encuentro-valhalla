@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CF Competition Leaderboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#0A0A0A;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#F0F0F0;min-height:100vh;}
+input,button{font-family:inherit;}
+input:focus{outline:none;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:#0A0A0A;}
+::-webkit-scrollbar-thumb{background:#2A2A2A;border-radius:2px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+const {useState, useEffect} = React;
+const h = React.createElement;
+
+// ── Constantes ───────────────────────────────────────────
+const ADMIN_PASS = "admin2026";
+const LEVELS = ['Beginner','Scaled','Advanced','RX'];
+const GENDERS = ['HH','MM','HM'];
+const GENDER_LABELS = {HH:'Hombres', MM:'Mujeres', HM:'Mixto'};
+const GOLD = '#F59E0B'; const SILVER = '#9CA3AF'; const BRONZE = '#CD7C2F'; const ACCENT = '#EC4899';
+
+const DEFAULT_CONFIG = {
+  name: 'CROSSFIT COMPETITION',
+  events: [
+    {name:'WOD 1', lower:true,  unit:'tiempo'},
+    {name:'WOD 2', lower:false, unit:'reps'},
+    {name:'WOD 3', lower:false, unit:'kg'},
+    {name:'WOD 4', lower:true,  unit:'tiempo'},
+  ]
+};
+
+// ── Utilidades ───────────────────────────────────────────
+function parseScore(s) {
+  if (!s || String(s).trim() === '') return null;
+  s = String(s).trim();
+  const m = s.match(/^(\d+):(\d{2})$/);
+  if (m) return parseInt(m[1]) * 60 + parseInt(m[2]);
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+function fmtRaw(val, unit) {
+  if (val === null || val === undefined || val === '') return null;
+  if (unit === 'kg') return val + ' kg';
+  if (unit === 'reps') return val + ' reps';
+  return val;
+}
+
+function rankColor(rank) {
+  if (rank === 1) return GOLD;
+  if (rank === 2) return SILVER;
+  if (rank === 3) return BRONZE;
+  return '#555';
+}
+
+function getRanks(teams, scores, lower) {
+  const withS = teams.filter(t => parseScore((scores || {})[t]) !== null);
+  const withoutS = teams.filter(t => !withS.includes(t));
+  const sorted = [...withS].sort((a, b) => {
+    const sa = parseScore(scores[a]), sb = parseScore(scores[b]);
+    return lower ? sa - sb : sb - sa;
+  });
+  const result = {}; let rank = 1;
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && parseScore(scores[sorted[i]]) === parseScore(scores[sorted[i-1]])) {
+      result[sorted[i]] = result[sorted[i-1]];
+    } else {
+      result[sorted[i]] = rank;
+    }
+    rank++;
+  }
+  const dns = withS.length + 1;
+  withoutS.forEach(t => { result[t] = null; });
+  return { ranks: result, dns };
+}
+
+function calcLeaderboard(teams, scores, config) {
+  if (!teams || !teams.length) return [];
+  const n = config.events.length;
+  const totals = {}; const evPts = {};
+  teams.forEach(t => { totals[t] = 0; evPts[t] = Array(n).fill(null); });
+  config.events.forEach((ev, ei) => {
+    const evS = (scores && scores[ei]) || {};
+    const hasData = teams.some(t => parseScore(evS[t]) !== null);
+    if (!hasData) return;
+    const { ranks, dns } = getRanks(teams, evS, ev.lower);
+    teams.forEach(t => {
+      if (ranks[t] !== null) { evPts[t][ei] = ranks[t]; totals[t] += ranks[t]; }
+      else { evPts[t][ei] = dns; totals[t] += dns; }
+    });
+  });
+  return [...teams].sort((a, b) => totals[a] - totals[b]).map((team, i) => ({
+    rank: i + 1, team, total: totals[team], pts: evPts[team],
+    raw: config.events.map((_, ei) => (scores && scores[ei]) ? (scores[ei][team] || null) : null)
+  }));
+}
+
+// ── LocalStorage ─────────────────────────────────────────
+function lsGet(k) { try { const v = localStorage.getItem('comp:' + k); return v ? JSON.parse(v) : null; } catch { return null; } }
+function lsSet(k, v) { try { localStorage.setItem('comp:' + k, JSON.stringify(v)); } catch(e) { console.error(e); } }
+
+// ── RankBadge ─────────────────────────────────────────────
+function RankBadge({rank}) {
+  const icons = {1:'🥇', 2:'🥈', 3:'🥉'};
+  if (icons[rank]) return h('span', {style:{fontSize:20}}, icons[rank]);
+  return h('div', {style:{width:26,height:26,borderRadius:'50%',background:'#1A1A1A',color:'#555',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700}}, rank);
+}
+
+// ── LoginModal ────────────────────────────────────────────
+function LoginModal({onLogin, onClose}) {
+  const [pass, setPass] = useState('');
+  const [err, setErr] = useState(false);
+  const go = () => {
+    if (pass === ADMIN_PASS) { onLogin(); }
+    else { setErr(true); setTimeout(() => setErr(false), 1500); }
+  };
+  return h('div', {style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.93)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}},
+    h('div', {style:{background:'#141414',border:'1px solid #2A2A2A',borderRadius:12,padding:28,width:'min(360px,92%)'}},
+      h('div', {style:{textAlign:'center',marginBottom:20}},
+        h('div', {style:{fontSize:40,marginBottom:8}}, '🏆'),
+        h('h3', {style:{color:'#F0F0F0',fontSize:16,fontWeight:700,margin:0}}, 'Panel de Administrador'),
+        h('p', {style:{color:'#555',fontSize:12,marginTop:6}}, 'Contraseña de acceso')
+      ),
+      h('input', {
+        type:'password', value:pass,
+        onChange: e => setPass(e.target.value),
+        onKeyDown: e => e.key === 'Enter' && go(),
+        placeholder:'Contraseña...', autoFocus:true,
+        style:{display:'block',width:'100%',background:'#0D0D0D',border:'1px solid ' + (err ? ACCENT : '#2A2A2A'),borderRadius:8,color:'#F0F0F0',padding:'11px 13px',fontSize:14,marginBottom:6}
+      }),
+      err && h('p', {style:{color:ACCENT,fontSize:11,textAlign:'center',margin:'0 0 10px'}}, 'Contraseña incorrecta'),
+      h('div', {style:{display:'flex',gap:8,marginTop:14}},
+        h('button', {onClick:onClose, style:{flex:1,padding:'10px',background:'none',border:'1px solid #2A2A2A',borderRadius:8,color:'#555',cursor:'pointer',fontSize:13}}, 'Cancelar'),
+        h('button', {onClick:go, style:{flex:1,padding:'10px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}}, 'Entrar')
+      )
+    )
+  );
+}
+
+// ── ConfigPanel ───────────────────────────────────────────
+function ConfigPanel({config, onSave}) {
+  const [name, setName] = useState(config.name);
+  const [events, setEvents] = useState(config.events.map(e => ({...e})));
+
+  const updEvent = (i, field, val) => {
+    setEvents(prev => prev.map((e, j) => j === i ? {...e, [field]: val} : e));
+  };
+
+  const cycleUnit = (i) => {
+    const cycle = {tiempo:'reps', reps:'kg', kg:'tiempo'};
+    const ev = events[i];
+    const nu = cycle[ev.unit || 'tiempo'];
+    setEvents(prev => prev.map((e, j) => j === i ? {...e, unit:nu, lower:nu==='tiempo'} : e));
+  };
+
+  const unitStyle = (unit) => {
+    if (unit === 'tiempo') return {bg:'#1D4ED815', border:'#1D4ED8', color:'#93C5FD', label:'⏱ TIEMPO'};
+    if (unit === 'kg')     return {bg:'#D9770615', border:'#F97316', color:'#FED7AA', label:'⚖️ KG'};
+    return                        {bg:'#86198F15', border:'#86198F', color:'#F0ABFC', label:'💪 REPS'};
+  };
+
+  const inp = {display:'block',width:'100%',background:'#0D0D0D',border:'1px solid #2A2A2A',borderRadius:6,color:'#F0F0F0',padding:'9px 11px',fontSize:13};
+
+  return h('div', {style:{padding:16}},
+    h('div', {style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}}, '⚙ Configuración General'),
+    h('span', {style:{fontSize:10,color:'#444',textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:5}}, 'Nombre de la competencia'),
+    h('input', {value:name, onChange:e=>setName(e.target.value), style:{...inp, fontSize:16, fontWeight:700, marginBottom:14}}),
+    h('span', {style:{fontSize:10,color:'#444',textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:8}}, 'Resultados / WODs'),
+    ...events.map((ev, i) => {
+      const us = unitStyle(ev.unit || 'tiempo');
+      return h('div', {key:i, style:{background:'#0D0D0D',border:'1px solid #1A1A1A',borderRadius:8,padding:'10px 12px',marginBottom:8,display:'flex',gap:8,alignItems:'center'}},
+        h('input', {value:ev.name, onChange:e=>updEvent(i,'name',e.target.value), placeholder:'WOD '+(i+1), style:{...inp,flex:1,padding:'7px 10px'}}),
+        h('button', {
+          onClick: () => cycleUnit(i),
+          style:{padding:'7px 11px',background:us.bg,border:'1px solid '+us.border,borderRadius:6,color:us.color,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'}
+        }, us.label)
+      );
+    }),
+    h('button', {onClick:()=>onSave({name,events}), style:{width:'100%',padding:'11px',background:GOLD,border:'none',borderRadius:8,color:'#000',cursor:'pointer',fontSize:13,fontWeight:800,marginTop:10}}, 'GUARDAR CONFIGURACIÓN')
+  );
+}
+
+// ── TeamsPanel ────────────────────────────────────────────
+function TeamsPanel({teams, onSave}) {
+  const [list, setList] = useState([...teams]);
+  const [val, setVal] = useState('');
+  const [editIdx, setEditIdx] = useState(null);
+  const [editVal, setEditVal] = useState('');
+
+  const add = () => {
+    const t = val.trim();
+    if (!t || list.map(x => x.toLowerCase()).includes(t.toLowerCase())) return;
+    const u = [...list, t]; setList(u); setVal(''); onSave(u);
+  };
+  const del = (t) => { const u = list.filter(x => x !== t); setList(u); onSave(u); };
+  const startEdit = (i) => { setEditIdx(i); setEditVal(list[i]); };
+  const confirmEdit = (i) => {
+    const t = editVal.trim();
+    if (!t || list.some((x, j) => j !== i && x.toLowerCase() === t.toLowerCase())) { setEditIdx(null); return; }
+    const u = list.map((x, j) => j === i ? t : x);
+    setList(u); onSave(u); setEditIdx(null);
+  };
+
+  return h('div', {style:{padding:16}},
+    h('div', {style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}}, '👥 Equipos en esta Categoría'),
+    h('div', {style:{display:'flex',gap:8,marginBottom:14}},
+      h('input', {value:val, onChange:e=>setVal(e.target.value), onKeyDown:e=>e.key==='Enter'&&add(), placeholder:'Nombre del equipo...',
+        style:{flex:1,background:'#0D0D0D',border:'1px solid #2A2A2A',borderRadius:8,color:'#F0F0F0',padding:'10px 12px',fontSize:13}}),
+      h('button', {onClick:add, style:{padding:'10px 16px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}}, '+ Añadir')
+    ),
+    !list.length
+      ? h('div', {style:{textAlign:'center',color:'#2A2A2A',padding:'20px 0',fontSize:12,letterSpacing:'0.1em'}}, 'Sin equipos en esta categoría')
+      : list.map((t, i) =>
+          h('div', {key:t+i, style:{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#0D0D0D',border:'1px solid '+(editIdx===i?ACCENT+'55':'#1A1A1A'),borderRadius:6,padding:'8px 10px',marginBottom:6,gap:8}},
+            h('div', {style:{display:'flex',alignItems:'center',gap:10,flex:1,minWidth:0}},
+              h('span', {style:{color:'#333',fontSize:11,fontWeight:700,flexShrink:0}}, (i+1)+'.'),
+              editIdx === i
+                ? h('input', {value:editVal, autoFocus:true,
+                    onChange:e=>setEditVal(e.target.value),
+                    onKeyDown:e=>{ if(e.key==='Enter') confirmEdit(i); if(e.key==='Escape') setEditIdx(null); },
+                    style:{flex:1,background:'#111',border:'1px solid #2A2A2A',borderRadius:5,color:'#F0F0F0',padding:'5px 9px',fontSize:13}})
+                : h('span', {style:{color:'#D0D0D0',fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}, t)
+            ),
+            editIdx === i
+              ? h('div', {style:{display:'flex',gap:5,flexShrink:0}},
+                  h('button', {onClick:()=>confirmEdit(i), style:{padding:'5px 11px',background:'#16A34A',border:'none',borderRadius:5,color:'white',cursor:'pointer',fontSize:12,fontWeight:700}}, '✓'),
+                  h('button', {onClick:()=>setEditIdx(null), style:{padding:'5px 9px',background:'none',border:'1px solid #2A2A2A',borderRadius:5,color:'#555',cursor:'pointer',fontSize:12}}, '✕')
+                )
+              : h('div', {style:{display:'flex',gap:5,flexShrink:0}},
+                  h('button', {onClick:()=>startEdit(i), title:'Editar nombre', style:{background:'#1A1A1A',border:'1px solid #2A2A2A',borderRadius:5,color:'#888',cursor:'pointer',fontSize:13,padding:'5px 9px',lineHeight:1}}, '✏️'),
+                  h('button', {onClick:()=>del(t), title:'Eliminar equipo', style:{background:'#1A1A1A',border:'1px solid #2A2A2A',borderRadius:5,color:'#888',cursor:'pointer',fontSize:13,padding:'5px 9px',lineHeight:1}}, '🗑️')
+                )
+          )
+        )
+  );
+}
+
+// ── ScoresPanel ───────────────────────────────────────────
+function ScoresPanel({teams, scores, config, onUpdate}) {
+  if (!teams.length) return h('div', {style:{padding:24,textAlign:'center',color:'#333',fontSize:12}}, 'Primero agregá equipos en la pestaña "Equipos"');
+
+  const unitIcon = (unit) => unit === 'tiempo' ? '⏱' : unit === 'kg' ? '⚖️' : '💪';
+  const unitColor = (unit) => unit === 'tiempo' ? '#93C5FD' : unit === 'kg' ? '#FED7AA' : '#F0ABFC';
+  const placeholder = (unit) => unit === 'tiempo' ? '1:23' : unit === 'kg' ? 'kg' : 'reps';
+
+  return h('div', {style:{padding:16}},
+    h('div', {style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}}, '📊 Carga de Resultados'),
+    h('p', {style:{fontSize:11,color:'#444',marginBottom:14}}, 'Tiempos en MM:SS — Peso/Reps como número. La app rankea automáticamente.'),
+    h('div', {style:{overflowX:'auto'}},
+      h('table', {style:{width:'100%',borderCollapse:'collapse'}},
+        h('thead', null,
+          h('tr', null,
+            h('th', {style:{textAlign:'left',padding:'8px 10px',color:'#444',fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid #1A1A1A'}}, 'Equipo'),
+            ...config.events.map((ev, ei) =>
+              h('th', {key:ei, style:{padding:'8px 10px',textAlign:'center',color:unitColor(ev.unit),fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid #1A1A1A',whiteSpace:'nowrap'}},
+                ev.name + ' ' + unitIcon(ev.unit)
+              )
+            )
+          )
+        ),
+        h('tbody', null,
+          teams.map(team =>
+            h('tr', {key:team, style:{borderBottom:'1px solid #111'}},
+              h('td', {style:{padding:'8px 10px',color:'#C0C0C0',fontWeight:600,fontSize:13,whiteSpace:'nowrap'}}, team),
+              ...config.events.map((ev, ei) => {
+                const v = ((scores && scores[ei]) || {})[team] || '';
+                return h('td', {key:ei, style:{padding:'5px 6px',textAlign:'center'}},
+                  h('input', {value:v, onChange:e=>onUpdate(ei, team, e.target.value), placeholder:placeholder(ev.unit),
+                    style:{width:85,background:'#111',border:'1px solid #1A1A1A',borderRadius:5,color:'#F0F0F0',padding:'7px 8px',fontSize:13,textAlign:'center'}})
+                );
+              })
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Leaderboard ───────────────────────────────────────────
+function Leaderboard({entries, config}) {
+  if (!entries.length) return h('div', {style:{textAlign:'center',color:'#1E1E1E',padding:'50px 0',fontSize:12,letterSpacing:'0.12em'}}, '— SIN EQUIPOS REGISTRADOS —');
+  const hasScores = config.events.some((_, ei) => entries.some(e => e.pts[ei] !== null));
+
+  return h('div', {style:{overflowX:'auto'}},
+    h('table', {style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
+      h('thead', null,
+        h('tr', null,
+          h('th', {style:{width:48,padding:'9px 6px',textAlign:'center',color:'#333',fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid #1A1A1A'}}, '#'),
+          h('th', {style:{textAlign:'left',padding:'9px 12px',color:'#333',fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid #1A1A1A'}}, 'Equipo'),
+          ...config.events.map((ev, ei) =>
+            h('th', {key:ei, style:{padding:'9px 8px',textAlign:'center',color:'#333',fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid #1A1A1A',whiteSpace:'nowrap'}}, ev.name)
+          ),
+          hasScores && h('th', {style:{padding:'9px 12px',textAlign:'center',color:GOLD,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid #1A1A1A',whiteSpace:'nowrap'}}, 'TOTAL')
+        )
+      ),
+      h('tbody', null,
+        entries.map(e => {
+          const rowBg = e.rank===1 ? GOLD+'14' : e.rank===2 ? SILVER+'08' : e.rank===3 ? BRONZE+'08' : 'transparent';
+          return h('tr', {key:e.team, style:{background:rowBg, borderBottom:'1px solid #0F0F0F'}},
+            h('td', {style:{padding:'12px 6px',textAlign:'center'}}, h(RankBadge, {rank:e.rank})),
+            h('td', {style:{padding:'12px 12px',fontWeight:600,color:'#E0E0E0',fontSize:14}}, e.team),
+            ...config.events.map((ev, ei) => {
+              const rc = rankColor(e.rank);
+              const rawFmt = e.raw && e.raw[ei] != null ? fmtRaw(e.raw[ei], ev.unit) : null;
+              return h('td', {key:ei, style:{padding:'12px 8px',textAlign:'center'}},
+                e.pts[ei] !== null
+                  ? h('div', {style:{display:'flex',flexDirection:'column',alignItems:'center',gap:3}},
+                      h('div', {style:{display:'inline-flex',alignItems:'center',justifyContent:'center',width:30,height:30,borderRadius:'50%',background:rc+'18',color:rc,fontWeight:800,fontSize:14}}, e.pts[ei]),
+                      rawFmt && h('span', {style:{fontSize:10,color:'#555',letterSpacing:'0.02em'}}, '(' + rawFmt + ')')
+                    )
+                  : h('span', {style:{color:'#222',fontSize:13}}, '—')
+              );
+            }),
+            hasScores && h('td', {style:{padding:'12px 12px',textAlign:'center',fontWeight:900,fontSize:18,color:e.rank===1?GOLD:e.rank===2?SILVER:e.rank===3?BRONZE:'#888'}}, e.total)
+          );
+        })
+      )
+    )
+  );
+}
+
+// ── App ───────────────────────────────────────────────────
+function App() {
+  const [selLevel, setSelLevel] = useState('Beginner');
+  const [selGender, setSelGender] = useState('HH');
+  const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [catData, setCatData] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [aTab, setATab] = useState('teams');
+
+  const curCat = selLevel + ' ' + selGender;
+  const curData = catData[curCat] || {teams:[], scores:{0:{},1:{},2:{},3:{}}};
+
+  useEffect(() => {
+    const cfg = lsGet('config');
+    if (cfg) setConfig(cfg);
+    const all = LEVELS.flatMap(l => GENDERS.map(g => l + ' ' + g));
+    const loaded = {};
+    all.forEach(cat => { const d = lsGet('cat:' + cat); if (d) loaded[cat] = d; });
+    setCatData(loaded);
+    setLoading(false);
+  }, []);
+
+  const saveConfig = (c) => { setConfig(c); lsSet('config', c); };
+  const saveTeams = (teams) => {
+    const nd = {...curData, teams};
+    setCatData(p => ({...p, [curCat]: nd}));
+    lsSet('cat:' + curCat, nd);
+  };
+  const updateScore = (ei, team, val) => {
+    const ns = {...curData.scores, [ei]: {...(curData.scores[ei] || {}), [team]: val}};
+    const nd = {...curData, scores: ns};
+    setCatData(p => ({...p, [curCat]: nd}));
+    lsSet('cat:' + curCat, nd);
+  };
+
+  const lb = calcLeaderboard(curData.teams, curData.scores, config);
+
+  const lvlS = (l) => ({padding:'8px 16px', background:selLevel===l?GOLD+'18':'none', border:'1px solid '+(selLevel===l?GOLD:'#1A1A1A'), borderRadius:6, color:selLevel===l?GOLD:'#3A3A3A', cursor:'pointer', fontSize:12, fontWeight:700, letterSpacing:'0.06em', whiteSpace:'nowrap'});
+  const gdrS = (g) => ({flex:1, padding:'8px 0', background:selGender===g?'#161616':'none', border:'1px solid '+(selGender===g?'#2A2A2A':'transparent'), borderRadius:6, color:selGender===g?'#B0B0B0':'#333', cursor:'pointer', fontSize:12, fontWeight:600});
+  const atS  = (t) => ({padding:'7px 14px', background:aTab===t?ACCENT+'18':'none', border:'1px solid '+(aTab===t?ACCENT:'#1A1A1A'), borderRadius:6, color:aTab===t?ACCENT:'#3A3A3A', cursor:'pointer', fontSize:11, fontWeight:600, letterSpacing:'0.04em'});
+
+  return h('div', {style:{minHeight:'100vh',display:'flex',flexDirection:'column'}},
+
+    showLogin && h(LoginModal, {onLogin:()=>{setIsAdmin(true);setShowLogin(false);}, onClose:()=>setShowLogin(false)}),
+
+    // Header
+    h('div', {style:{background:'#0D0D0D',borderBottom:'1px solid #141414',padding:'14px 16px'}},
+      h('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}},
+        h('div', null,
+          h('div', {style:{fontSize:20,fontWeight:900,color:'#F0F0F0',letterSpacing:'0.05em'}}, '🏆 ' + (loading ? '...' : config.name)),
+          h('div', {style:{fontSize:9,color:'#2A2A2A',textTransform:'uppercase',letterSpacing:'0.14em',marginTop:3}}, 'Tabla de Posiciones · CrossFit')
+        ),
+        isAdmin
+          ? h('button', {onClick:()=>setIsAdmin(false), style:{background:ACCENT,border:'none',borderRadius:6,color:'white',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:800,letterSpacing:'0.07em'}}, '● ADMIN')
+          : h('button', {onClick:()=>setShowLogin(true), style:{background:'none',border:'1px solid #1A1A1A',borderRadius:6,color:'#2A2A2A',cursor:'pointer',fontSize:11,padding:'7px 14px',letterSpacing:'0.07em'}}, 'ADMIN')
+      ),
+      h('div', {style:{display:'flex',gap:6,marginBottom:8,overflowX:'auto'}},
+        LEVELS.map(l => h('button', {key:l, onClick:()=>setSelLevel(l), style:lvlS(l)}, l))
+      ),
+      h('div', {style:{display:'flex',gap:4}},
+        GENDERS.map(g => h('button', {key:g, onClick:()=>setSelGender(g), style:gdrS(g)}, g + ' · ' + GENDER_LABELS[g]))
+      )
+    ),
+
+    // Category bar
+    h('div', {style:{padding:'10px 16px',background:'#0C0C0C',borderBottom:'1px solid #111',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+      h('div', {style:{display:'flex',alignItems:'center',gap:10}},
+        h('span', {style:{fontSize:15,fontWeight:800,color:'#D0D0D0',letterSpacing:'0.04em'}}, curCat),
+        h('span', {style:{fontSize:11,color:'#2A2A2A'}}, curData.teams.length + ' equipos')
+      ),
+      lb.length > 0 && h('span', {style:{fontSize:9,color:GOLD,letterSpacing:'0.09em',fontWeight:700}}, 'CLASIFICACIÓN EN VIVO')
+    ),
+
+    // Leaderboard
+    h('div', {style:{padding:14,flex:1}},
+      loading
+        ? h('div', {style:{textAlign:'center',padding:50,color:'#2A2A2A',letterSpacing:'0.1em',fontSize:12}}, 'CARGANDO...')
+        : h(Leaderboard, {entries:lb, config})
+    ),
+
+    // Admin panel
+    isAdmin && h('div', {style:{margin:'0 14px 14px',background:'#0D0D0D',border:'1px solid #1A1A1A',borderRadius:10,overflow:'hidden'}},
+      h('div', {style:{display:'flex',gap:6,padding:'10px 12px',borderBottom:'1px solid #111'}},
+        h('button', {onClick:()=>setATab('teams'), style:atS('teams')}, '👥 Equipos'),
+        h('button', {onClick:()=>setATab('scores'), style:atS('scores')}, '📊 Resultados'),
+        h('button', {onClick:()=>setATab('config'), style:atS('config')}, '⚙ Config')
+      ),
+      aTab === 'teams'  && h(TeamsPanel,  {key:'teams-'+curCat,  teams:curData.teams, onSave:saveTeams}),
+      aTab === 'scores' && h(ScoresPanel, {key:'scores-'+curCat, teams:curData.teams, scores:curData.scores, config, onUpdate:updateScore}),
+      aTab === 'config' && h(ConfigPanel, {config, onSave:saveConfig})
+    ),
+
+    // Footer
+    h('div', {style:{padding:'8px 16px',borderTop:'1px solid #0F0F0F',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+      h('span', {style:{fontSize:9,color:'#1A1A1A',letterSpacing:'0.08em'}}, 'Menor puntaje = mejor posición · Empates comparten rango'),
+      h('span', {style:{fontSize:9,color:'#1A1A1A'}}, (LEVELS.length * GENDERS.length) + ' categorías')
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
+</body>
+</html>
