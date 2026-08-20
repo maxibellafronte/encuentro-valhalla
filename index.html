@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CF Competition Leaderboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#F4F5F7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#171A1F;min-height:100vh;}
+input,button{font-family:inherit;}
+input:focus{outline:none;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:#F4F5F7;}
+::-webkit-scrollbar-thumb{background:#D3D8DF;border-radius:2px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+const {useState, useEffect, useRef} = React;
+const h = React.createElement;
+
+// ── Supabase ──────────────────────────────────────────────
+const SUPA_URL = 'https://wmbcvsklchhhofazqfxq.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtYmN2c2tsY2hoaG9mYXpxZnhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MzkwNjksImV4cCI6MjA5NzQxNTA2OX0.71JRIJ4BEHJva6qPOUAM7JX2Nzemuy-bLTesOgiS27k';
+const HDR = {'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'};
+
+async function dbGet(key) {
+  try {
+    const r = await fetch(SUPA_URL+'/rest/v1/competition?key=eq.'+encodeURIComponent(key)+'&select=data', {headers:HDR});
+    const rows = await r.json();
+    return Array.isArray(rows) && rows.length > 0 ? rows[0].data : null;
+  } catch(e) { console.error('dbGet error',e); return null; }
+}
+
+async function dbSet(key, value) {
+  try {
+    const r = await fetch(SUPA_URL+'/rest/v1/competition?on_conflict=key', {
+      method:'POST',
+      headers:{...HDR,'Prefer':'resolution=merge-duplicates'},
+      body: JSON.stringify({key, data:value, updated_at:new Date().toISOString()})
+    });
+    if (!r.ok) { const t = await r.text(); console.error('dbSet error', r.status, t); throw new Error('Supabase error '+r.status+': '+t); }
+  } catch(e) { console.error('dbSet error',e); throw e; }
+}
+
+async function dbDeleteScores() {
+  // Elimina solo los scores de todas las categorias (conserva equipos y config)
+  try {
+    const r = await fetch(SUPA_URL+"/rest/v1/competition?key=like.scores%3A*", {
+      method:'DELETE',
+      headers:HDR
+    });
+    if (!r.ok) { const t = await r.text(); throw new Error('Delete error '+r.status+': '+t); }
+  } catch(e) { console.error('dbDeleteScores error',e); throw e; }
+}
+
+async function dbDeleteTeams() {
+  // Elimina los equipos de todas las categorias (conserva config)
+  try {
+    const r = await fetch(SUPA_URL+"/rest/v1/competition?key=like.teams%3A*", {
+      method:'DELETE',
+      headers:HDR
+    });
+    if (!r.ok) { const t = await r.text(); throw new Error('Delete error '+r.status+': '+t); }
+  } catch(e) { console.error('dbDeleteTeams error',e); throw e; }
+}
+
+// ── Constantes ────────────────────────────────────────────
+const ADMIN_PASS = 'admin2026';
+const LEVELS = ['Beginner','Scaled','Advanced','RX'];
+const GENDERS = ['HH','MM'];
+const GENDER_LABELS = {HH:'Hombres',MM:'Mujeres'};
+const GOLD='#B45309'; const SILVER='#6B7280'; const BRONZE='#9A5B22'; const ACCENT='#DB2777';
+
+// ── Tema (claro) ──────────────────────────────────────────
+const BG='#F4F5F7'; const SURFACE='#FFFFFF'; const SURFACE_ALT='#EEF0F3'; const FIELD_BG='#F8F9FB';
+const BORDER_SOFT='#EDEFF2'; const BORDER='#E3E6EB'; const BORDER_STRONG='#D3D8DF';
+const T1='#171A1F'; const T2='#2E3440'; const T3='#5B6472'; const T4='#7B8494';
+const T5='#9AA2B0'; const T6='#AFB6C2'; const T7='#C2C8D1'; const T8='#D7DBE2';
+
+// Config base (WOD 3 se adapta por nivel en getConfig)
+const BASE_CONFIG = {
+  name: 'CROSSFIT COMPETITION',
+  events: [
+    {name:'WOD 1', lower:true,  unit:'tiempo'},
+    {name:'WOD 2', lower:false, unit:'reps'},
+    {name:'WOD 3', lower:false, unit:'reps'},  // se sobreescribe por nivel
+    {name:'WOD 4', lower:true,  unit:'tiempo'},
+  ]
+};
+
+// WOD 3: Scaled = reps | Advanced/RX = kg
+function getConfig(base, level) {
+  const isHeavy = level === 'Advanced' || level === 'RX';
+  return {
+    ...base,
+    events: base.events.map((ev, i) =>
+      i === 2 ? {...ev, unit: isHeavy ? 'kg' : 'reps', lower: false} : ev
+    )
+  };
+}
+
+// ── Utilidades ────────────────────────────────────────────
+function parseScore(s) {
+  if (!s || String(s).trim() === '') return null;
+  s = String(s).trim();
+  const m = s.match(/^(\d+):(\d{2})$/);
+  if (m) return parseInt(m[1])*60 + parseInt(m[2]);
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+function fmtRaw(val, unit) {
+  if (val === null || val === undefined || val === '') return null;
+  if (unit === 'kg') return val+' kg';
+  if (unit === 'reps') return val+' reps';
+  return val;
+}
+
+function rankColor(rank) {
+  if (rank === 1) return GOLD;
+  if (rank === 2) return SILVER;
+  if (rank === 3) return BRONZE;
+  return '#5B6472';
+}
+
+function getRanks(teams, scores, lower) {
+  const sc = scores || {};
+  const withS = teams.filter(t => parseScore(sc[t]) !== null);
+  const without = teams.filter(t => parseScore(sc[t]) === null);
+  const sorted = [...withS].sort((a,b) => {
+    const sa=parseScore(sc[a]), sb=parseScore(sc[b]);
+    return lower ? sa-sb : sb-sa;
+  });
+  const result = {}; let rank = 1;
+  for (let i = 0; i < sorted.length; i++) {
+    result[sorted[i]] = (i>0 && parseScore(sc[sorted[i]])===parseScore(sc[sorted[i-1]]))
+      ? result[sorted[i-1]] : rank;
+    rank++;
+  }
+  without.forEach(t => { result[t] = null; });
+  return {ranks:result, dns:withS.length+1};
+}
+
+function calcLeaderboard(teams, scores, config) {
+  if (!teams || !teams.length) return [];
+  const n = config.events.length;
+  const totals = {}; const evPts = {};
+  teams.forEach(t => { totals[t]=0; evPts[t]=Array(n).fill(null); });
+  config.events.forEach((ev, ei) => {
+    const evS = (scores && scores[String(ei)]) || (scores && scores[ei]) || {};
+    const hasData = teams.some(t => parseScore(evS[t]) !== null);
+    if (!hasData) return;
+    const {ranks, dns} = getRanks(teams, evS, ev.lower);
+    teams.forEach(t => {
+      if (ranks[t] !== null) { evPts[t][ei]=ranks[t]; totals[t]+=ranks[t]; }
+      else { evPts[t][ei]=dns; totals[t]+=dns; }
+    });
+  });
+  return [...teams].sort((a,b)=>{
+    // 1. Menor total de puntos gana
+    if(totals[a]!==totals[b]) return totals[a]-totals[b];
+    // 2. Empate: gana quien tuvo más 1eros puestos
+    const ones=(t)=>evPts[t].filter(p=>p===1).length;
+    if(ones(b)!==ones(a)) return ones(b)-ones(a);
+    // 3. Empate: gana quien tuvo más 2dos puestos
+    const twos=(t)=>evPts[t].filter(p=>p===2).length;
+    return twos(b)-twos(a);
+  }).map((team,i)=>({
+    rank:i+1, team, total:totals[team], pts:evPts[team],
+    raw: config.events.map((_,ei)=>{
+      const evS=(scores&&scores[String(ei)])||(scores&&scores[ei])||{};
+      return evS[team]||null;
+    })
+  }));
+}
+
+// ── Components ────────────────────────────────────────────
+function RankBadge({rank}) {
+  const icons={1:'🥇',2:'🥈',3:'🥉'};
+  if (icons[rank]) return h('span',{style:{fontSize:20}},icons[rank]);
+  return h('div',{style:{width:26,height:26,borderRadius:'50%',background:SURFACE_ALT,color:T4,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700}},rank);
+}
+
+function LoginModal({onLogin,onClose}) {
+  const [pass,setPass]=useState(''); const [err,setErr]=useState(false);
+  const go=()=>{ if(pass===ADMIN_PASS)onLogin(); else{setErr(true);setTimeout(()=>setErr(false),1500);} };
+  return h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}},
+    h('div',{style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:12,padding:28,width:'min(360px,92%)',boxShadow:'0 12px 32px rgba(23,26,31,0.12)'}},
+      h('div',{style:{textAlign:'center',marginBottom:20}},
+        h('div',{style:{fontSize:40,marginBottom:8}},'🏆'),
+        h('h3',{style:{color:T1,fontSize:16,fontWeight:700,margin:0}},'Panel de Administrador'),
+        h('p',{style:{color:T4,fontSize:12,marginTop:6}},'Contraseña de acceso')
+      ),
+      h('input',{type:'password',value:pass,onChange:e=>setPass(e.target.value),onKeyDown:e=>e.key==='Enter'&&go(),
+        placeholder:'Contraseña...',autoFocus:true,
+        style:{display:'block',width:'100%',background:FIELD_BG,border:'1px solid '+(err?ACCENT:BORDER_STRONG),borderRadius:8,color:T1,padding:'11px 13px',fontSize:14,marginBottom:6}}),
+      err&&h('p',{style:{color:ACCENT,fontSize:11,textAlign:'center',margin:'0 0 10px'}},'Contraseña incorrecta'),
+      h('div',{style:{display:'flex',gap:8,marginTop:14}},
+        h('button',{onClick:onClose,style:{flex:1,padding:'10px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
+        h('button',{onClick:go,style:{flex:1,padding:'10px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},'Entrar')
+      )
+    )
+  );
+}
+
+function ConfigPanel({config,onSave}) {
+  const [name,setName]=useState(config.name);
+  const [events,setEvents]=useState(config.events.map(e=>({...e})));
+  const cycleUnit=(i)=>{
+    const cycle={tiempo:'reps',reps:'kg',kg:'tiempo'};
+    setEvents(prev=>prev.map((e,j)=>{ if(j!==i)return e; const nu=cycle[e.unit||'tiempo']; return{...e,unit:nu,lower:nu==='tiempo'}; }));
+  };
+  const us=(unit)=>{
+    if(unit==='tiempo')return{bg:'#EFF6FF',border:'#1D4ED8',color:'#1D4ED8',label:'⏱ TIEMPO'};
+    if(unit==='kg')    return{bg:'#FFF7ED',border:'#F97316',color:'#C2410C',label:'⚖️ KG'};
+    return                   {bg:'#FDF4FF',border:'#A21CAF',color:'#86198F',label:'💪 REPS'};
+  };
+  const inp={display:'block',width:'100%',background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T1,padding:'9px 11px',fontSize:13};
+  return h('div',{style:{padding:16}},
+    h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}},'⚙ Configuración General'),
+    h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:5}},'Nombre de la competencia'),
+    h('input',{value:name,onChange:e=>setName(e.target.value),style:{...inp,fontSize:16,fontWeight:700,marginBottom:14}}),
+    h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:8}},'Nombres de los WODs'),
+    ...events.map((ev,i)=>{
+      const s=us(ev.unit||'tiempo');
+      const isWod3=i===2;
+      return h('div',{key:i,style:{background:SURFACE_ALT,border:'1px solid '+BORDER,borderRadius:8,padding:'10px 12px',marginBottom:8,display:'flex',gap:8,alignItems:'center'}},
+        h('input',{value:ev.name,onChange:e=>setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:e.target.value}:x)),placeholder:'WOD '+(i+1),style:{...inp,flex:1,padding:'7px 10px'}}),
+        isWod3
+          ? h('div',{style:{padding:'7px 11px',background:BORDER,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T4,fontSize:9,fontWeight:700,whiteSpace:'nowrap'}},'AUTO POR NIVEL')
+          : h('button',{onClick:()=>cycleUnit(i),style:{padding:'7px 11px',background:s.bg,border:'1px solid '+s.border,borderRadius:6,color:s.color,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'}},s.label)
+      );
+    }),
+    h('div',{style:{background:'#FFFBEB',border:'1px solid #FDE68A',borderRadius:8,padding:'10px 12px',marginBottom:10,fontSize:11,color:T3}},
+      '⚠️  WOD 3: se muestra como ',h('strong',{style:{color:'#86198F'}},'REPS'),' en Scaled/Beginner y como ',h('strong',{style:{color:'#C2410C'}},'KG'),' en Advanced/RX automáticamente.'
+    ),
+    h('button',{onClick:()=>onSave({name,events}),style:{width:'100%',padding:'11px',background:GOLD,border:'none',borderRadius:8,color:'#fff',cursor:'pointer',fontSize:13,fontWeight:800}},'GUARDAR CONFIGURACIÓN')
+  );
+}
+
+function TeamsPanel({teams,onSave}) {
+  const [list,setList]=useState([...teams]);
+  const [val,setVal]=useState('');
+  const [editIdx,setEditIdx]=useState(null);
+  const [editVal,setEditVal]=useState('');
+  const [dirty,setDirty]=useState(false);
+  const [savingLocal,setSavingLocal]=useState(false);
+  const [saved,setSaved]=useState(false);
+
+  const add=()=>{
+    const t=val.trim();
+    if(!t||list.map(x=>x.toLowerCase()).includes(t.toLowerCase()))return;
+    const u=[...list,t]; setList(u); setVal(''); setDirty(true);
+  };
+  const del=(t)=>{ const u=list.filter(x=>x!==t); setList(u); setDirty(true); };
+  const startEdit=(i)=>{ setEditIdx(i); setEditVal(list[i]); };
+  const confirmEdit=(i)=>{
+    const t=editVal.trim();
+    if(!t||list.some((x,j)=>j!==i&&x.toLowerCase()===t.toLowerCase())){setEditIdx(null);return;}
+    const u=list.map((x,j)=>j===i?t:x); setList(u); setDirty(true); setEditIdx(null);
+  };
+  const [saveError,setSaveError]=useState(false);
+  const handleSave=async()=>{
+    setSavingLocal(true);
+    setSaveError(false);
+    try{
+      await onSave(list);
+      setDirty(false);
+      setSaved(true);
+      setTimeout(()=>setSaved(false),2500);
+    }catch(e){
+      console.error('Save failed:',e);
+      setSaveError(true);
+      setTimeout(()=>setSaveError(false),4000);
+    }finally{
+      setSavingLocal(false);
+    }
+  };
+
+  return h('div',{style:{padding:16}},
+    h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}},'👥 Equipos en esta Categoría'),
+    h('div',{style:{display:'flex',gap:8,marginBottom:14}},
+      h('input',{value:val,onChange:e=>setVal(e.target.value),onKeyDown:e=>e.key==='Enter'&&add(),placeholder:'Nombre del equipo...',
+        style:{flex:1,background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T1,padding:'10px 12px',fontSize:13}}),
+      h('button',{onClick:add,style:{padding:'10px 16px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},'+ Añadir')
+    ),
+    !list.length
+      ?h('div',{style:{textAlign:'center',color:T6,padding:'20px 0',fontSize:12,letterSpacing:'0.1em'}},'Sin equipos en esta categoría')
+      :list.map((t,i)=>
+        h('div',{key:t+i,style:{display:'flex',justifyContent:'space-between',alignItems:'center',background:FIELD_BG,border:'1px solid '+(editIdx===i?ACCENT+'55':BORDER),borderRadius:6,padding:'8px 10px',marginBottom:6,gap:8}},
+          h('div',{style:{display:'flex',alignItems:'center',gap:10,flex:1,minWidth:0}},
+            h('span',{style:{color:T6,fontSize:11,fontWeight:700,flexShrink:0}},(i+1)+'.'),
+            editIdx===i
+              ?h('input',{value:editVal,autoFocus:true,onChange:e=>setEditVal(e.target.value),
+                  onKeyDown:e=>{if(e.key==='Enter')confirmEdit(i);if(e.key==='Escape')setEditIdx(null);},
+                  style:{flex:1,background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T1,padding:'5px 9px',fontSize:13}})
+              :h('span',{style:{color:T2,fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},t)
+          ),
+          editIdx===i
+            ?h('div',{style:{display:'flex',gap:5,flexShrink:0}},
+                h('button',{onClick:()=>confirmEdit(i),style:{padding:'5px 11px',background:'#16A34A',border:'none',borderRadius:5,color:'white',cursor:'pointer',fontSize:12,fontWeight:700}},'✓'),
+                h('button',{onClick:()=>setEditIdx(null),style:{padding:'5px 9px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T4,cursor:'pointer',fontSize:12}},'✕')
+              )
+            :h('div',{style:{display:'flex',gap:5,flexShrink:0}},
+                h('button',{onClick:()=>startEdit(i),style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T3,cursor:'pointer',fontSize:13,padding:'5px 9px',lineHeight:1}},'✏️'),
+                h('button',{onClick:()=>del(t),style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T3,cursor:'pointer',fontSize:13,padding:'5px 9px',lineHeight:1}},'🗑️')
+              )
+        )
+      ),
+    h('div',{style:{marginTop:14,display:'flex',alignItems:'center',gap:10}},
+      h('button',{
+        onClick:handleSave,
+        disabled:!dirty||savingLocal,
+        style:{
+          flex:1, padding:'12px 0',
+          background:saveError?'#DC2626':saved?'#1D4ED8':dirty?'#16A34A':SURFACE_ALT,
+          border:'1px solid '+(saveError?'#EF4444':saved?'#1D4ED8':dirty?'#16A34A':BORDER),
+          borderRadius:8, color:dirty||saved||saveError?'white':T5,
+          cursor:dirty?'pointer':'default',
+          fontSize:13, fontWeight:700, letterSpacing:'0.06em',
+          transition:'all 0.2s'
+        }
+      }, savingLocal?'GUARDANDO...':saved?'✓ GUARDADO':dirty?'💾 GUARDAR EQUIPOS':'SIN CAMBIOS PENDIENTES'),
+      dirty&&!savingLocal&&h('span',{style:{fontSize:10,color:'#EA580C',letterSpacing:'0.06em',flexShrink:0}},'● sin guardar')
+    )
+  );
+}
+
+function ScoresPanel({teams,scores,config,onUpdate}) {
+  if(!teams.length)return h('div',{style:{padding:24,textAlign:'center',color:T6,fontSize:12}},'Primero agregá equipos en la pestaña "Equipos"');
+  const unitIcon =(u)=>u==='tiempo'?'⏱':u==='kg'?'⚖️':'💪';
+  const unitColor=(u)=>u==='tiempo'?'#1D4ED8':u==='kg'?'#C2410C':'#86198F';
+  const ph       =(u)=>u==='tiempo'?'1:23':u==='kg'?'kg':'reps';
+  return h('div',{style:{padding:16}},
+    h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'📊 Carga de Resultados'),
+    h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Tiempos en MM:SS — Peso/Reps como número. La app rankea automáticamente.'),
+    h('div',{style:{overflowX:'auto'}},
+      h('table',{style:{width:'100%',borderCollapse:'collapse'}},
+        h('thead',null,h('tr',null,
+          h('th',{style:{textAlign:'left',padding:'8px 10px',color:T5,fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER}},'Equipo'),
+          ...config.events.map((ev,ei)=>h('th',{key:ei,style:{padding:'8px 10px',textAlign:'center',color:unitColor(ev.unit),fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},ev.name+' '+unitIcon(ev.unit)))
+        )),
+        h('tbody',null,teams.map(team=>h('tr',{key:team,style:{borderBottom:'1px solid '+BORDER_SOFT}},
+          h('td',{style:{padding:'8px 10px',color:T2,fontWeight:600,fontSize:13,whiteSpace:'nowrap'}},team),
+          ...config.events.map((ev,ei)=>{
+            const evS=(scores&&(scores[String(ei)]||scores[ei]))||{};
+            const v=evS[team]||'';
+            return h('td',{key:ei,style:{padding:'5px 6px',textAlign:'center'}},
+              h('input',{value:v,onChange:e=>onUpdate(ei,team,e.target.value),placeholder:ph(ev.unit),
+                style:{width:85,background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T1,padding:'7px 8px',fontSize:13,textAlign:'center'}})
+            );
+          })
+        )))
+      )
+    )
+  );
+}
+
+function Leaderboard({entries,config}) {
+  if(!entries.length)return h('div',{style:{textAlign:'center',color:T7,padding:'50px 0',fontSize:12,letterSpacing:'0.12em'}},'— SIN EQUIPOS REGISTRADOS —');
+  const hasScores=config.events.some((_,ei)=>entries.some(e=>e.pts[ei]!==null));
+  return h('div',{style:{overflowX:'auto',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10}},
+    h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
+      h('thead',null,h('tr',null,
+        h('th',{style:{width:48,padding:'9px 6px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER}},'#'),
+        h('th',{style:{textAlign:'left',padding:'9px 12px',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER}},'Equipo'),
+        ...config.events.map((ev,ei)=>h('th',{key:ei,style:{padding:'9px 8px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},ev.name)),
+        hasScores&&h('th',{style:{padding:'9px 12px',textAlign:'center',color:GOLD,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'TOTAL')
+      )),
+      h('tbody',null,entries.map(e=>{
+        const rowBg=e.rank===1?GOLD+'12':e.rank===2?SILVER+'0C':e.rank===3?BRONZE+'0C':'transparent';
+        return h('tr',{key:e.team,style:{background:rowBg,borderBottom:'1px solid '+BORDER_SOFT}},
+          h('td',{style:{padding:'12px 6px',textAlign:'center'}},h(RankBadge,{rank:e.rank})),
+          h('td',{style:{padding:'12px 12px',fontWeight:600,color:T2,fontSize:14}},e.team),
+          ...config.events.map((ev,ei)=>{
+            const rc=rankColor(e.rank);
+            const rawFmt=e.raw&&e.raw[ei]!=null?fmtRaw(e.raw[ei],ev.unit):null;
+            return h('td',{key:ei,style:{padding:'12px 8px',textAlign:'center'}},
+              e.pts[ei]!==null
+                ?h('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:3}},
+                    h('div',{style:{display:'inline-flex',alignItems:'center',justifyContent:'center',width:30,height:30,borderRadius:'50%',background:rc+'18',color:rc,fontWeight:800,fontSize:14}},e.pts[ei]),
+                    rawFmt&&h('span',{style:{fontSize:10,color:T4}},'('+rawFmt+')')
+                  )
+                :h('span',{style:{color:T7,fontSize:13}},'—')
+            );
+          }),
+          hasScores&&h('td',{style:{padding:'12px 12px',textAlign:'center',fontWeight:900,fontSize:18,color:e.rank===1?GOLD:e.rank===2?SILVER:e.rank===3?BRONZE:T3}},e.total)
+        );
+      }))
+    )
+  );
+}
+
+// ── App ───────────────────────────────────────────────────
+function App() {
+  const [selLevel,setSelLevel]=useState('Scaled');
+  const [selGender,setSelGender]=useState('HH');
+  const [baseConfig,setBaseConfig]=useState(BASE_CONFIG);
+  const [teams,setTeams]=useState({});    // {catKey: [teamNames]}
+  const [scores,setScores]=useState({});  // {catKey: {0:{},1:{},2:{},3:{}}}
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [isAdmin,setIsAdmin]=useState(false);
+  const [showLogin,setShowLogin]=useState(false);
+  const [aTab,setATab]=useState('teams');
+  const scoreTimer=useRef({});
+
+  const curCat=selLevel+' '+selGender;
+  const curTeams=teams[curCat]||[];
+  const curScores=scores[curCat]||{};
+  const config=getConfig(baseConfig,selLevel);
+
+  // Carga inicial desde Supabase
+  useEffect(()=>{
+    async function loadAll(){
+      setLoading(true);
+      const all=LEVELS.flatMap(l=>GENDERS.map(g=>l+' '+g));
+      const results=await Promise.all([
+        dbGet('config'),
+        ...all.map(cat=>dbGet('teams:'+cat).then(d=>[cat,'teams',d])),
+        ...all.map(cat=>dbGet('scores:'+cat).then(d=>[cat,'scores',d])),
+      ]);
+      const cfg=results[0];
+      if(cfg)setBaseConfig(cfg);
+      const newTeams={};const newScores={};
+      results.slice(1).forEach(item=>{
+        if(!Array.isArray(item))return;
+        const [cat,type,data]=item;
+        if(!data)return;
+        if(type==='teams') newTeams[cat]=Array.isArray(data)?data:[];
+        if(type==='scores') newScores[cat]=data;
+      });
+      setTeams(newTeams);
+      setScores(newScores);
+      setLoading(false);
+    }
+    loadAll();
+  },[]);
+
+  // saveTeams: guardado directo, devuelve promise para que TeamsPanel pueda hacer await
+  const saveTeams=async(newList)=>{
+    setTeams(prev=>({...prev,[curCat]:newList}));
+    setSaving(true);
+    await dbSet('teams:'+curCat, newList);
+    setSaving(false);
+  };
+
+  // saveConfig: debounce corto (cambios manuales, sin race condition)
+  const saveConfig=(cfg)=>{
+    setBaseConfig(cfg);
+    setSaving(true);
+    clearTimeout(scoreTimer.current['config']);
+    scoreTimer.current['config']=setTimeout(async()=>{
+      await dbSet('config',cfg);
+      setSaving(false);
+    },600);
+  };
+
+  // updateScore: debounce mientras tipea
+  const updateScore=(ei,team,val)=>{
+    const key='scores:'+curCat;
+    const newScoresCat={...curScores,[String(ei)]:{...((curScores[String(ei)]||curScores[ei])||{}),[team]:val}};
+    setScores(prev=>({...prev,[curCat]:newScoresCat}));
+    setSaving(true);
+    clearTimeout(scoreTimer.current[key]);
+    scoreTimer.current[key]=setTimeout(async()=>{
+      await dbSet(key,newScoresCat);
+      setSaving(false);
+    },600);
+  };
+
+  const [showConfirm,setShowConfirm]=useState(false);
+  const [clearing,setClearing]=useState(false);
+
+  const handleClearScores=async()=>{
+    setClearing(true);
+    try{
+      await dbDeleteScores();
+      setScores({});
+    }catch(e){
+      alert('Error al limpiar resultados: '+e.message);
+    }finally{
+      setClearing(false);
+      setShowConfirm(false);
+    }
+  };
+
+  const [showConfirmTeams,setShowConfirmTeams]=useState(false);
+  const [clearingTeams,setClearingTeams]=useState(false);
+
+  const handleClearTeams=async()=>{
+    setClearingTeams(true);
+    try{
+      await dbDeleteTeams();
+      await dbDeleteScores();
+      setTeams({});
+      setScores({});
+    }catch(e){
+      alert('Error al borrar equipos: '+e.message);
+    }finally{
+      setClearingTeams(false);
+      setShowConfirmTeams(false);
+    }
+  };
+
+  const lb=calcLeaderboard(curTeams,curScores,config);
+
+  const lvlS=(l)=>({padding:'8px 16px',background:selLevel===l?GOLD+'14':'none',border:'1px solid '+(selLevel===l?GOLD:BORDER),borderRadius:6,color:selLevel===l?GOLD:T5,cursor:'pointer',fontSize:12,fontWeight:700,letterSpacing:'0.06em',whiteSpace:'nowrap'});
+  const gdrS=(g)=>({flex:1,padding:'8px 0',background:selGender===g?SURFACE_ALT:'none',border:'1px solid '+(selGender===g?BORDER_STRONG:'transparent'),borderRadius:6,color:selGender===g?T2:T6,cursor:'pointer',fontSize:12,fontWeight:600});
+  const atS =(t)=>({padding:'7px 14px',background:aTab===t?ACCENT+'14':'none',border:'1px solid '+(aTab===t?ACCENT:BORDER),borderRadius:6,color:aTab===t?ACCENT:T5,cursor:'pointer',fontSize:11,fontWeight:600,letterSpacing:'0.04em'});
+
+  return h('div',{style:{minHeight:'100vh',display:'flex',flexDirection:'column'}},
+
+    showLogin&&h(LoginModal,{onLogin:()=>{setIsAdmin(true);setShowLogin(false);},onClose:()=>setShowLogin(false)}),
+
+    // Confirm modal (limpiar resultados)
+    showConfirm&&h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:500}},
+      h('div',{style:{background:SURFACE,border:'1px solid #FCA5A5',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
+        h('div',{style:{fontSize:36,marginBottom:12}},'⚠️'),
+        h('h3',{style:{color:'#B91C1C',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Limpiar todos los resultados'),
+        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar los resultados de ',h('strong',{style:{color:T1}},'todas las categorías'),' de forma permanente. Los equipos no se borran.'),
+        h('div',{style:{display:'flex',gap:10}},
+          h('button',{onClick:()=>setShowConfirm(false),style:{flex:1,padding:'11px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
+          h('button',{onClick:handleClearScores,disabled:clearing,style:{flex:1,padding:'11px',background:'#DC2626',border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},
+            clearing?'LIMPIANDO...':'SÍ, LIMPIAR TODO'
+          )
+        )
+      )
+    ),
+
+    // Confirm modal (borrar equipos)
+    showConfirmTeams&&h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:500}},
+      h('div',{style:{background:SURFACE,border:'1px solid #FCA5A5',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
+        h('div',{style:{fontSize:36,marginBottom:12}},'⚠️'),
+        h('h3',{style:{color:'#B91C1C',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Borrar todos los equipos'),
+        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar ',h('strong',{style:{color:T1}},'todos los equipos de todas las categorías'),' de forma permanente, junto con sus resultados. Esta acción no se puede deshacer.'),
+        h('div',{style:{display:'flex',gap:10}},
+          h('button',{onClick:()=>setShowConfirmTeams(false),style:{flex:1,padding:'11px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
+          h('button',{onClick:handleClearTeams,disabled:clearingTeams,style:{flex:1,padding:'11px',background:'#DC2626',border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},
+            clearingTeams?'BORRANDO...':'SÍ, BORRAR TODO'
+          )
+        )
+      )
+    ),
+    h('div',{style:{background:SURFACE,borderBottom:'1px solid '+BORDER,padding:'14px 16px'}},
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}},
+        h('div',null,
+          h('div',{style:{fontSize:20,fontWeight:900,color:T1,letterSpacing:'0.05em'}},'🏆 '+(loading?'...':baseConfig.name)),
+          h('div',{style:{display:'flex',alignItems:'center',gap:8,marginTop:3}},
+            h('div',{style:{fontSize:9,color:T6,textTransform:'uppercase',letterSpacing:'0.14em'}},'Tabla de Posiciones · CrossFit'),
+            saving&&h('div',{style:{fontSize:9,color:T5,letterSpacing:'0.08em'}},'· GUARDANDO...')
+          )
+        ),
+        h('div',{style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}},
+          isAdmin&&h('button',{
+            onClick:()=>setShowConfirmTeams(true),
+            style:{background:'#FEF2F2',border:'1px solid #DC2626',borderRadius:6,color:'#B91C1C',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
+          },'🗑 Borrar equipos'),
+          isAdmin&&h('button',{
+            onClick:()=>setShowConfirm(true),
+            style:{background:'#FEF2F2',border:'1px solid #DC2626',borderRadius:6,color:'#B91C1C',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
+          },'🗑 Limpiar resultados'),
+          isAdmin
+            ?h('button',{onClick:()=>setIsAdmin(false),style:{background:ACCENT,border:'none',borderRadius:6,color:'white',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:800,letterSpacing:'0.07em'}},'● ADMIN')
+            :h('button',{onClick:()=>setShowLogin(true),style:{background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T5,cursor:'pointer',fontSize:11,padding:'7px 14px',letterSpacing:'0.07em'}},'ADMIN')
+        )
+      ),
+      h('div',{style:{display:'flex',gap:6,marginBottom:8,overflowX:'auto'}},
+        LEVELS.map(l=>h('button',{key:l,onClick:()=>setSelLevel(l),style:lvlS(l)},l))
+      ),
+      h('div',{style:{display:'flex',gap:4}},
+        GENDERS.map(g=>h('button',{key:g,onClick:()=>setSelGender(g),style:gdrS(g)},g+' · '+GENDER_LABELS[g]))
+      )
+    ),
+
+    h('div',{style:{padding:'10px 16px',background:SURFACE_ALT,borderBottom:'1px solid '+BORDER,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:6}},
+      h('div',{style:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
+        h('span',{style:{fontSize:15,fontWeight:800,color:T2,letterSpacing:'0.04em'}},curCat),
+        h('span',{style:{fontSize:11,color:T6}},curTeams.length+' equipos'),
+        (selLevel==='Advanced'||selLevel==='RX')
+          &&h('span',{style:{fontSize:9,color:'#C2410C',letterSpacing:'0.08em',fontWeight:600}},'WOD 3: ⚖️ KG'),
+        (selLevel==='Scaled'||selLevel==='Beginner')
+          &&h('span',{style:{fontSize:9,color:'#86198F',letterSpacing:'0.08em',fontWeight:600}},'WOD 3: 💪 REPS')
+      ),
+      lb.length>0&&h('span',{style:{fontSize:9,color:GOLD,letterSpacing:'0.09em',fontWeight:700}},'CLASIFICACIÓN EN VIVO')
+    ),
+
+    h('div',{style:{padding:14,flex:1}},
+      loading
+        ?h('div',{style:{textAlign:'center',padding:50,color:T6,letterSpacing:'0.1em',fontSize:12}},'CONECTANDO A BASE DE DATOS...')
+        :h(Leaderboard,{entries:lb,config})
+    ),
+
+    isAdmin&&h('div',{style:{margin:'0 14px 14px',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10,overflow:'hidden'}},
+      h('div',{style:{display:'flex',gap:6,padding:'10px 12px',borderBottom:'1px solid '+BORDER_SOFT}},
+        h('button',{onClick:()=>setATab('teams'), style:atS('teams') },'👥 Equipos'),
+        h('button',{onClick:()=>setATab('scores'),style:atS('scores')},'📊 Resultados'),
+        h('button',{onClick:()=>setATab('config'),style:atS('config')},'⚙ Config')
+      ),
+      aTab==='teams' &&h(TeamsPanel, {key:'t-'+curCat,teams:curTeams,onSave:saveTeams}),
+      aTab==='scores'&&h(ScoresPanel,{key:'s-'+curCat,teams:curTeams,scores:curScores,config,onUpdate:updateScore}),
+      aTab==='config'&&h(ConfigPanel,{config:baseConfig,onSave:saveConfig})
+    ),
+
+    h('div',{style:{padding:'8px 16px',borderTop:'1px solid '+BORDER_SOFT,display:'flex',justifyContent:'space-between',alignItems:'center'}},
+      h('span',{style:{fontSize:9,color:T7,letterSpacing:'0.08em'}},'Menor puntaje = mejor posición · Empates comparten rango'),
+      h('span',{style:{fontSize:9,color:T7}},(LEVELS.length*GENDERS.length)+' categorías')
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
+</body>
+</html>
