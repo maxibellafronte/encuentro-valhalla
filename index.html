@@ -88,9 +88,12 @@ async function dbDeleteTeams() {
 }
 
 // ── Constantes ────────────────────────────────────────────
-const LEVELS = ['Beginner','Scaled','Advanced','RX'];
-const GENDERS = ['HH','MM'];
-const GENDER_LABELS = {HH:'Hombres',MM:'Mujeres'};
+// Categorías de la próxima competencia. Las de antes (Beginner/Scaled/Advanced/RX
+// y HH/MM) quedan ocultas pero sus datos siguen intactos en Supabase — para
+// volver a usarlas alcanza con restaurar estas dos constantes.
+const LEVELS = ['Participativa','Competitiva'];
+const GENDERS = ['HHM','MMH'];
+const GENDER_LABELS = {HHM:'2 Hombres + 1 Mujer',MMH:'2 Mujeres + 1 Hombre'};
 const GOLD='#B45309'; const SILVER='#6B7280'; const BRONZE='#9A5B22'; const ACCENT='#DB2777';
 
 // ── Tema (claro) ──────────────────────────────────────────
@@ -112,7 +115,7 @@ const BASE_CONFIG = {
 
 // WOD 3: Scaled = reps | Advanced/RX = kg
 function getConfig(base, level) {
-  const isHeavy = level === 'Advanced' || level === 'RX';
+  const isHeavy = level === 'Advanced' || level === 'RX' || level === 'Competitiva';
   return {
     ...base,
     events: base.events.map((ev, i) =>
@@ -425,8 +428,8 @@ function Leaderboard({entries,config}) {
 
 // ── App ───────────────────────────────────────────────────
 function App() {
-  const [selLevel,setSelLevel]=useState('Scaled');
-  const [selGender,setSelGender]=useState('HH');
+  const [selLevel,setSelLevel]=useState('Participativa');
+  const [selGender,setSelGender]=useState('HHM');
   const [baseConfig,setBaseConfig]=useState(BASE_CONFIG);
   const [teams,setTeams]=useState({});    // {catKey: [teamNames]}
   const [scores,setScores]=useState({});  // {catKey: {0:{},1:{},2:{},3:{}}}
@@ -618,9 +621,9 @@ function App() {
       h('div',{style:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
         h('span',{style:{fontSize:15,fontWeight:800,color:T2,letterSpacing:'0.04em'}},curCat),
         h('span',{style:{fontSize:11,color:T6}},curTeams.length+' equipos'),
-        (selLevel==='Advanced'||selLevel==='RX')
+        selLevel==='Competitiva'
           &&h('span',{style:{fontSize:9,color:'#C2410C',letterSpacing:'0.08em',fontWeight:600}},'WOD 3: ⚖️ KG'),
-        (selLevel==='Scaled'||selLevel==='Beginner')
+        selLevel==='Participativa'
           &&h('span',{style:{fontSize:9,color:'#86198F',letterSpacing:'0.08em',fontWeight:600}},'WOD 3: 💪 REPS')
       ),
       lb.length>0&&h('span',{style:{fontSize:9,color:GOLD,letterSpacing:'0.09em',fontWeight:700}},'CLASIFICACIÓN EN VIVO')
