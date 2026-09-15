@@ -18,18 +18,34 @@ input:focus{outline:none;}
 <div id="root"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const {useState, useEffect, useRef} = React;
 const h = React.createElement;
 
 // ── Supabase ──────────────────────────────────────────────
 const SUPA_URL = 'https://wmbcvsklchhhofazqfxq.supabase.co';
-const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtYmN2c2tsY2hoaG9mYXpxZnhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MzkwNjksImV4cCI6MjA5NzQxNTA2OX0.71JRIJ4BEHJva6qPOUAM7JX2Nzemuy-bLTesOgiS27k';
-const HDR = {'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'};
+const SUPA_KEY = 'sb_publishable_noaWN01HJOEUh2r9w5Dfwg_CWlZfIYG';
+
+// Cliente real de Supabase: maneja el login y guarda/renueva la sesión (JWT) sola.
+const sbClient = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+
+// Devuelve el access_token del usuario logueado (o null si no hay sesión activa).
+async function getAuthToken() {
+  const {data} = await sbClient.auth.getSession();
+  return data && data.session ? data.session.access_token : null;
+}
+
+// token=null => lecturas públicas con la key anónima. Las escrituras SIEMPRE
+// necesitan un token de sesión real; si no hay, Supabase las rechaza por RLS
+// (el chequeo de "admin" ya no depende solo del front, lo hace el backend).
+function authHeaders(token) {
+  return {'apikey':SUPA_KEY,'Authorization':'Bearer '+(token||SUPA_KEY),'Content-Type':'application/json'};
+}
 
 async function dbGet(key) {
   try {
-    const r = await fetch(SUPA_URL+'/rest/v1/competition?key=eq.'+encodeURIComponent(key)+'&select=data', {headers:HDR});
+    const r = await fetch(SUPA_URL+'/rest/v1/competition?key=eq.'+encodeURIComponent(key)+'&select=data', {headers:authHeaders()});
     const rows = await r.json();
     return Array.isArray(rows) && rows.length > 0 ? rows[0].data : null;
   } catch(e) { console.error('dbGet error',e); return null; }
@@ -37,9 +53,10 @@ async function dbGet(key) {
 
 async function dbSet(key, value) {
   try {
+    const token = await getAuthToken();
     const r = await fetch(SUPA_URL+'/rest/v1/competition?on_conflict=key', {
       method:'POST',
-      headers:{...HDR,'Prefer':'resolution=merge-duplicates'},
+      headers:{...authHeaders(token),'Prefer':'resolution=merge-duplicates'},
       body: JSON.stringify({key, data:value, updated_at:new Date().toISOString()})
     });
     if (!r.ok) { const t = await r.text(); console.error('dbSet error', r.status, t); throw new Error('Supabase error '+r.status+': '+t); }
@@ -49,9 +66,10 @@ async function dbSet(key, value) {
 async function dbDeleteScores() {
   // Elimina solo los scores de todas las categorias (conserva equipos y config)
   try {
+    const token = await getAuthToken();
     const r = await fetch(SUPA_URL+"/rest/v1/competition?key=like.scores%3A*", {
       method:'DELETE',
-      headers:HDR
+      headers:authHeaders(token)
     });
     if (!r.ok) { const t = await r.text(); throw new Error('Delete error '+r.status+': '+t); }
   } catch(e) { console.error('dbDeleteScores error',e); throw e; }
@@ -60,16 +78,16 @@ async function dbDeleteScores() {
 async function dbDeleteTeams() {
   // Elimina los equipos de todas las categorias (conserva config)
   try {
+    const token = await getAuthToken();
     const r = await fetch(SUPA_URL+"/rest/v1/competition?key=like.teams%3A*", {
       method:'DELETE',
-      headers:HDR
+      headers:authHeaders(token)
     });
     if (!r.ok) { const t = await r.text(); throw new Error('Delete error '+r.status+': '+t); }
   } catch(e) { console.error('dbDeleteTeams error',e); throw e; }
 }
 
 // ── Constantes ────────────────────────────────────────────
-const ADMIN_PASS = 'admin2026';
 const LEVELS = ['Beginner','Scaled','Advanced','RX'];
 const GENDERS = ['HH','MM'];
 const GENDER_LABELS = {HH:'Hombres',MM:'Mujeres'};
@@ -186,22 +204,32 @@ function RankBadge({rank}) {
 }
 
 function LoginModal({onLogin,onClose}) {
-  const [pass,setPass]=useState(''); const [err,setErr]=useState(false);
-  const go=()=>{ if(pass===ADMIN_PASS)onLogin(); else{setErr(true);setTimeout(()=>setErr(false),1500);} };
+  const [email,setEmail]=useState(''); const [pass,setPass]=useState('');
+  const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
+  const go=async()=>{
+    if(!email.trim()||!pass){setErr('Completá email y contraseña');return;}
+    setBusy(true); setErr('');
+    const {error}=await sbClient.auth.signInWithPassword({email:email.trim(),password:pass});
+    setBusy(false);
+    if(error){ setErr('Email o contraseña incorrectos'); return; }
+    onLogin();
+  };
+  const inp={display:'block',width:'100%',background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T1,padding:'11px 13px',fontSize:14,marginBottom:10};
   return h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}},
     h('div',{style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:12,padding:28,width:'min(360px,92%)',boxShadow:'0 12px 32px rgba(23,26,31,0.12)'}},
       h('div',{style:{textAlign:'center',marginBottom:20}},
         h('div',{style:{fontSize:40,marginBottom:8}},'🏆'),
         h('h3',{style:{color:T1,fontSize:16,fontWeight:700,margin:0}},'Panel de Administrador'),
-        h('p',{style:{color:T4,fontSize:12,marginTop:6}},'Contraseña de acceso')
+        h('p',{style:{color:T4,fontSize:12,marginTop:6}},'Iniciá sesión con tu cuenta de admin')
       ),
+      h('input',{type:'email',value:email,onChange:e=>setEmail(e.target.value),onKeyDown:e=>e.key==='Enter'&&go(),
+        placeholder:'Email...',autoFocus:true,style:{...inp,borderColor:err?ACCENT:BORDER_STRONG}}),
       h('input',{type:'password',value:pass,onChange:e=>setPass(e.target.value),onKeyDown:e=>e.key==='Enter'&&go(),
-        placeholder:'Contraseña...',autoFocus:true,
-        style:{display:'block',width:'100%',background:FIELD_BG,border:'1px solid '+(err?ACCENT:BORDER_STRONG),borderRadius:8,color:T1,padding:'11px 13px',fontSize:14,marginBottom:6}}),
-      err&&h('p',{style:{color:ACCENT,fontSize:11,textAlign:'center',margin:'0 0 10px'}},'Contraseña incorrecta'),
+        placeholder:'Contraseña...',style:{...inp,marginBottom:6,borderColor:err?ACCENT:BORDER_STRONG}}),
+      err&&h('p',{style:{color:ACCENT,fontSize:11,textAlign:'center',margin:'0 0 10px'}},err),
       h('div',{style:{display:'flex',gap:8,marginTop:14}},
         h('button',{onClick:onClose,style:{flex:1,padding:'10px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
-        h('button',{onClick:go,style:{flex:1,padding:'10px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},'Entrar')
+        h('button',{onClick:go,disabled:busy,style:{flex:1,padding:'10px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},busy?'Entrando...':'Entrar')
       )
     )
   );
@@ -404,7 +432,8 @@ function App() {
   const [scores,setScores]=useState({});  // {catKey: {0:{},1:{},2:{},3:{}}}
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
-  const [isAdmin,setIsAdmin]=useState(false);
+  const [session,setSession]=useState(null);
+  const isAdmin=!!session;
   const [showLogin,setShowLogin]=useState(false);
   const [aTab,setATab]=useState('teams');
   const scoreTimer=useRef({});
@@ -413,6 +442,14 @@ function App() {
   const curTeams=teams[curCat]||[];
   const curScores=scores[curCat]||{};
   const config=getConfig(baseConfig,selLevel);
+
+  // Sesión de admin: se restaura sola si ya había una guardada, y se mantiene
+  // al día ante login/logout/renovación de token.
+  useEffect(()=>{
+    sbClient.auth.getSession().then(({data})=>setSession(data.session));
+    const {data:sub}=sbClient.auth.onAuthStateChange((_event,newSession)=>setSession(newSession));
+    return ()=>sub.subscription.unsubscribe();
+  },[]);
 
   // Carga inicial desde Supabase
   useEffect(()=>{
@@ -515,7 +552,7 @@ function App() {
 
   return h('div',{style:{minHeight:'100vh',display:'flex',flexDirection:'column'}},
 
-    showLogin&&h(LoginModal,{onLogin:()=>{setIsAdmin(true);setShowLogin(false);},onClose:()=>setShowLogin(false)}),
+    showLogin&&h(LoginModal,{onLogin:()=>setShowLogin(false),onClose:()=>setShowLogin(false)}),
 
     // Confirm modal (limpiar resultados)
     showConfirm&&h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:500}},
@@ -565,7 +602,7 @@ function App() {
             style:{background:'#FEF2F2',border:'1px solid #DC2626',borderRadius:6,color:'#B91C1C',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
           },'🗑 Limpiar resultados'),
           isAdmin
-            ?h('button',{onClick:()=>setIsAdmin(false),style:{background:ACCENT,border:'none',borderRadius:6,color:'white',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:800,letterSpacing:'0.07em'}},'● ADMIN')
+            ?h('button',{onClick:()=>sbClient.auth.signOut(),style:{background:ACCENT,border:'none',borderRadius:6,color:'white',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:800,letterSpacing:'0.07em'}},'● ADMIN')
             :h('button',{onClick:()=>setShowLogin(true),style:{background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T5,cursor:'pointer',fontSize:11,padding:'7px 14px',letterSpacing:'0.07em'}},'ADMIN')
         )
       ),
