@@ -590,10 +590,7 @@ function App() {
       h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}},
         h('div',null,
           h('div',{style:{fontSize:20,fontWeight:900,color:T1,letterSpacing:'0.05em'}},'🏆 '+(loading?'...':baseConfig.name)),
-          h('div',{style:{display:'flex',alignItems:'center',gap:8,marginTop:3}},
-            h('div',{style:{fontSize:9,color:T6,textTransform:'uppercase',letterSpacing:'0.14em'}},'Tabla de Posiciones · CrossFit'),
-            saving&&h('div',{style:{fontSize:9,color:T5,letterSpacing:'0.08em'}},'· GUARDANDO...')
-          )
+          saving&&h('div',{style:{fontSize:9,color:T5,letterSpacing:'0.08em',marginTop:3}},'GUARDANDO...')
         ),
         h('div',{style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}},
           isAdmin&&h('button',{
