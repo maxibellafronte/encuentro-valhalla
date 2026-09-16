@@ -63,27 +63,31 @@ async function dbSet(key, value) {
   } catch(e) { console.error('dbSet error',e); throw e; }
 }
 
+async function dbDeleteByKey(key, token) {
+  const r = await fetch(SUPA_URL+'/rest/v1/competition?key=eq.'+encodeURIComponent(key), {
+    method:'DELETE',
+    headers:authHeaders(token)
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error('Delete error '+r.status+': '+t); }
+}
+
+// Borra solo los scores de las categorías VISIBLES hoy (LEVELS x GENDERS),
+// nunca las ocultas (Beginner/Scaled/Advanced/RX, HH/MM) — esas se conservan
+// pase lo que pase acá. Conserva equipos y config.
 async function dbDeleteScores() {
-  // Elimina solo los scores de todas las categorias (conserva equipos y config)
   try {
     const token = await getAuthToken();
-    const r = await fetch(SUPA_URL+"/rest/v1/competition?key=like.scores%3A*", {
-      method:'DELETE',
-      headers:authHeaders(token)
-    });
-    if (!r.ok) { const t = await r.text(); throw new Error('Delete error '+r.status+': '+t); }
+    const keys = LEVELS.flatMap(l=>GENDERS.map(g=>'scores:'+l+' '+g));
+    await Promise.all(keys.map(k=>dbDeleteByKey(k, token)));
   } catch(e) { console.error('dbDeleteScores error',e); throw e; }
 }
 
+// Borra solo los equipos de los géneros VISIBLES hoy (GENDERS), nunca las
+// categorías ocultas. Conserva config.
 async function dbDeleteTeams() {
-  // Elimina los equipos de todas las categorias (conserva config)
   try {
     const token = await getAuthToken();
-    const r = await fetch(SUPA_URL+"/rest/v1/competition?key=like.teams%3A*", {
-      method:'DELETE',
-      headers:authHeaders(token)
-    });
-    if (!r.ok) { const t = await r.text(); throw new Error('Delete error '+r.status+': '+t); }
+    await Promise.all(GENDERS.map(g=>dbDeleteByKey('teams:'+g, token)));
   } catch(e) { console.error('dbDeleteTeams error',e); throw e; }
 }
 
@@ -273,8 +277,8 @@ function ConfigPanel({config,onSave}) {
   );
 }
 
-function TeamsPanel({teams,onSave}) {
-  const [list,setList]=useState([...teams]);
+function TeamsPanel({teams,levels,genderLabel,onSave}) {
+  const [list,setList]=useState(teams.map(t=>({...t})));
   const [val,setVal]=useState('');
   const [editIdx,setEditIdx]=useState(null);
   const [editVal,setEditVal]=useState('');
@@ -284,15 +288,18 @@ function TeamsPanel({teams,onSave}) {
 
   const add=()=>{
     const t=val.trim();
-    if(!t||list.map(x=>x.toLowerCase()).includes(t.toLowerCase()))return;
-    const u=[...list,t]; setList(u); setVal(''); setDirty(true);
+    if(!t||list.some(x=>x.name.toLowerCase()===t.toLowerCase()))return;
+    const u=[...list,{name:t,level:null}]; setList(u); setVal(''); setDirty(true);
   };
-  const del=(t)=>{ const u=list.filter(x=>x!==t); setList(u); setDirty(true); };
-  const startEdit=(i)=>{ setEditIdx(i); setEditVal(list[i]); };
+  const del=(name)=>{ const u=list.filter(x=>x.name!==name); setList(u); setDirty(true); };
+  const startEdit=(i)=>{ setEditIdx(i); setEditVal(list[i].name); };
   const confirmEdit=(i)=>{
     const t=editVal.trim();
-    if(!t||list.some((x,j)=>j!==i&&x.toLowerCase()===t.toLowerCase())){setEditIdx(null);return;}
-    const u=list.map((x,j)=>j===i?t:x); setList(u); setDirty(true); setEditIdx(null);
+    if(!t||list.some((x,j)=>j!==i&&x.name.toLowerCase()===t.toLowerCase())){setEditIdx(null);return;}
+    const u=list.map((x,j)=>j===i?{...x,name:t}:x); setList(u); setDirty(true); setEditIdx(null);
+  };
+  const toggleLevel=(i,lv)=>{
+    const u=list.map((x,j)=>j===i?{...x,level:x.level===lv?null:lv}:x); setList(u); setDirty(true);
   };
   const [saveError,setSaveError]=useState(false);
   const handleSave=async()=>{
@@ -312,34 +319,44 @@ function TeamsPanel({teams,onSave}) {
     }
   };
 
+  const unassigned=list.filter(x=>!x.level).length;
+  const lvlPillS=(active)=>({padding:'4px 10px',background:active?GOLD+'14':'none',border:'1px solid '+(active?GOLD:BORDER_STRONG),borderRadius:5,color:active?GOLD:T5,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'});
   return h('div',{style:{padding:16}},
-    h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}},'👥 Equipos en esta Categoría'),
+    h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'👥 Equipos · '+genderLabel),
+    h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Podés cargar el equipo sin definir la categoría y asignarla después con los botones de abajo.'+(unassigned?' · '+unassigned+' sin asignar':'')),
     h('div',{style:{display:'flex',gap:8,marginBottom:14}},
       h('input',{value:val,onChange:e=>setVal(e.target.value),onKeyDown:e=>e.key==='Enter'&&add(),placeholder:'Nombre del equipo...',
         style:{flex:1,background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T1,padding:'10px 12px',fontSize:13}}),
       h('button',{onClick:add,style:{padding:'10px 16px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},'+ Añadir')
     ),
     !list.length
-      ?h('div',{style:{textAlign:'center',color:T6,padding:'20px 0',fontSize:12,letterSpacing:'0.1em'}},'Sin equipos en esta categoría')
+      ?h('div',{style:{textAlign:'center',color:T6,padding:'20px 0',fontSize:12,letterSpacing:'0.1em'}},'Sin equipos cargados')
       :list.map((t,i)=>
-        h('div',{key:t+i,style:{display:'flex',justifyContent:'space-between',alignItems:'center',background:FIELD_BG,border:'1px solid '+(editIdx===i?ACCENT+'55':BORDER),borderRadius:6,padding:'8px 10px',marginBottom:6,gap:8}},
-          h('div',{style:{display:'flex',alignItems:'center',gap:10,flex:1,minWidth:0}},
-            h('span',{style:{color:T6,fontSize:11,fontWeight:700,flexShrink:0}},(i+1)+'.'),
+        h('div',{key:t.name+i,style:{background:FIELD_BG,border:'1px solid '+(editIdx===i?ACCENT+'55':BORDER),borderRadius:6,padding:'8px 10px',marginBottom:6}},
+          h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}},
+            h('div',{style:{display:'flex',alignItems:'center',gap:10,flex:1,minWidth:0}},
+              h('span',{style:{color:T6,fontSize:11,fontWeight:700,flexShrink:0}},(i+1)+'.'),
+              editIdx===i
+                ?h('input',{value:editVal,autoFocus:true,onChange:e=>setEditVal(e.target.value),
+                    onKeyDown:e=>{if(e.key==='Enter')confirmEdit(i);if(e.key==='Escape')setEditIdx(null);},
+                    style:{flex:1,background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T1,padding:'5px 9px',fontSize:13}})
+                :h('span',{style:{color:T2,fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},t.name)
+            ),
             editIdx===i
-              ?h('input',{value:editVal,autoFocus:true,onChange:e=>setEditVal(e.target.value),
-                  onKeyDown:e=>{if(e.key==='Enter')confirmEdit(i);if(e.key==='Escape')setEditIdx(null);},
-                  style:{flex:1,background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T1,padding:'5px 9px',fontSize:13}})
-              :h('span',{style:{color:T2,fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},t)
+              ?h('div',{style:{display:'flex',gap:5,flexShrink:0}},
+                  h('button',{onClick:()=>confirmEdit(i),style:{padding:'5px 11px',background:'#16A34A',border:'none',borderRadius:5,color:'white',cursor:'pointer',fontSize:12,fontWeight:700}},'✓'),
+                  h('button',{onClick:()=>setEditIdx(null),style:{padding:'5px 9px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T4,cursor:'pointer',fontSize:12}},'✕')
+                )
+              :h('div',{style:{display:'flex',gap:5,flexShrink:0}},
+                  h('button',{onClick:()=>startEdit(i),style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T3,cursor:'pointer',fontSize:13,padding:'5px 9px',lineHeight:1}},'✏️'),
+                  h('button',{onClick:()=>del(t.name),style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T3,cursor:'pointer',fontSize:13,padding:'5px 9px',lineHeight:1}},'🗑️')
+                )
           ),
-          editIdx===i
-            ?h('div',{style:{display:'flex',gap:5,flexShrink:0}},
-                h('button',{onClick:()=>confirmEdit(i),style:{padding:'5px 11px',background:'#16A34A',border:'none',borderRadius:5,color:'white',cursor:'pointer',fontSize:12,fontWeight:700}},'✓'),
-                h('button',{onClick:()=>setEditIdx(null),style:{padding:'5px 9px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T4,cursor:'pointer',fontSize:12}},'✕')
-              )
-            :h('div',{style:{display:'flex',gap:5,flexShrink:0}},
-                h('button',{onClick:()=>startEdit(i),style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T3,cursor:'pointer',fontSize:13,padding:'5px 9px',lineHeight:1}},'✏️'),
-                h('button',{onClick:()=>del(t),style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T3,cursor:'pointer',fontSize:13,padding:'5px 9px',lineHeight:1}},'🗑️')
-              )
+          h('div',{style:{display:'flex',alignItems:'center',gap:6,marginTop:6}},
+            h('span',{style:{fontSize:9,color:T5,letterSpacing:'0.05em'}},'Categoría:'),
+            ...levels.map(lv=>h('button',{key:lv,onClick:()=>toggleLevel(i,lv),style:lvlPillS(t.level===lv)},lv)),
+            !t.level&&h('span',{style:{fontSize:9,color:'#EA580C',fontStyle:'italic'}},'sin asignar')
+          )
         )
       ),
     h('div',{style:{marginTop:14,display:'flex',alignItems:'center',gap:10}},
@@ -362,7 +379,7 @@ function TeamsPanel({teams,onSave}) {
 }
 
 function ScoresPanel({teams,scores,config,onUpdate}) {
-  if(!teams.length)return h('div',{style:{padding:24,textAlign:'center',color:T6,fontSize:12}},'Primero agregá equipos en la pestaña "Equipos"');
+  if(!teams.length)return h('div',{style:{padding:24,textAlign:'center',color:T6,fontSize:12}},'No hay equipos asignados a esta categoría todavía — agregalos y asignales la categoría en la pestaña "Equipos"');
   const unitIcon =(u)=>u==='tiempo'?'⏱':u==='kg'?'⚖️':'💪';
   const unitColor=(u)=>u==='tiempo'?'#1D4ED8':u==='kg'?'#C2410C':'#86198F';
   const ph       =(u)=>u==='tiempo'?'1:23':u==='kg'?'kg':'reps';
@@ -431,7 +448,7 @@ function App() {
   const [selLevel,setSelLevel]=useState('Participativa');
   const [selGender,setSelGender]=useState('HHM');
   const [baseConfig,setBaseConfig]=useState(BASE_CONFIG);
-  const [teams,setTeams]=useState({});    // {catKey: [teamNames]}
+  const [teams,setTeams]=useState({});    // {gender: [{name, level:null|'Participativa'|'Competitiva'}]}
   const [scores,setScores]=useState({});  // {catKey: {0:{},1:{},2:{},3:{}}}
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
@@ -442,7 +459,8 @@ function App() {
   const scoreTimer=useRef({});
 
   const curCat=selLevel+' '+selGender;
-  const curTeams=teams[curCat]||[];
+  const genderTeams=teams[selGender]||[];               // todos los equipos de este género (cualquier categoría, incluso sin asignar)
+  const curTeams=genderTeams.filter(t=>t.level===selLevel).map(t=>t.name); // solo los ya asignados a la categoría actual
   const curScores=scores[curCat]||{};
   const config=getConfig(baseConfig,selLevel);
 
@@ -460,20 +478,38 @@ function App() {
       setLoading(true);
       const all=LEVELS.flatMap(l=>GENDERS.map(g=>l+' '+g));
       const results=await Promise.all([
-        dbGet('config'),
-        ...all.map(cat=>dbGet('teams:'+cat).then(d=>[cat,'teams',d])),
-        ...all.map(cat=>dbGet('scores:'+cat).then(d=>[cat,'scores',d])),
+        dbGet('config').then(d=>['config',null,d]),
+        ...GENDERS.map(g=>dbGet('teams:'+g).then(d=>['teams',g,d])),
+        ...all.map(cat=>dbGet('scores:'+cat).then(d=>['scores',cat,d])),
       ]);
-      const cfg=results[0];
-      if(cfg)setBaseConfig(cfg);
+      let cfg=null;
       const newTeams={};const newScores={};
-      results.slice(1).forEach(item=>{
-        if(!Array.isArray(item))return;
-        const [cat,type,data]=item;
+      results.forEach(([type,key,data])=>{
+        if(type==='config'){ cfg=data; return; }
         if(!data)return;
-        if(type==='teams') newTeams[cat]=Array.isArray(data)?data:[];
-        if(type==='scores') newScores[cat]=data;
+        if(type==='teams') newTeams[key]=Array.isArray(data)?data:[];
+        if(type==='scores') newScores[key]=data;
       });
+
+      // Migración: si un género todavía no tiene datos en el esquema nuevo
+      // (teams:<genero>), busca en el esquema viejo (teams:<nivel> <genero>)
+      // y lo junta en uno solo, con la categoría de cada equipo ya asignada.
+      // No borra las claves viejas, solo deja de leerlas de acá en más.
+      for (const g of GENDERS) {
+        if (newTeams[g] && newTeams[g].length) continue;
+        const legacyLists = await Promise.all(LEVELS.map(l=>dbGet('teams:'+l+' '+g)));
+        const merged=[];
+        LEVELS.forEach((l,i)=>{
+          const arr=legacyLists[i];
+          if(Array.isArray(arr)) arr.forEach(name=>{ if(name) merged.push({name, level:l}); });
+        });
+        if(merged.length){
+          newTeams[g]=merged;
+          await dbSet('teams:'+g, merged);
+        }
+      }
+
+      if(cfg)setBaseConfig(cfg);
       setTeams(newTeams);
       setScores(newScores);
       setLoading(false);
@@ -483,9 +519,9 @@ function App() {
 
   // saveTeams: guardado directo, devuelve promise para que TeamsPanel pueda hacer await
   const saveTeams=async(newList)=>{
-    setTeams(prev=>({...prev,[curCat]:newList}));
+    setTeams(prev=>({...prev,[selGender]:newList}));
     setSaving(true);
-    await dbSet('teams:'+curCat, newList);
+    await dbSet('teams:'+selGender, newList);
     setSaving(false);
   };
 
@@ -562,7 +598,7 @@ function App() {
       h('div',{style:{background:SURFACE,border:'1px solid #FCA5A5',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
         h('div',{style:{fontSize:36,marginBottom:12}},'⚠️'),
         h('h3',{style:{color:'#B91C1C',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Limpiar todos los resultados'),
-        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar los resultados de ',h('strong',{style:{color:T1}},'todas las categorías'),' de forma permanente. Los equipos no se borran.'),
+        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar los resultados de ',h('strong',{style:{color:T1}},'Participativa y Competitiva'),' de forma permanente (las categorías ocultas no se tocan). Los equipos no se borran.'),
         h('div',{style:{display:'flex',gap:10}},
           h('button',{onClick:()=>setShowConfirm(false),style:{flex:1,padding:'11px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
           h('button',{onClick:handleClearScores,disabled:clearing,style:{flex:1,padding:'11px',background:'#DC2626',border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},
@@ -577,7 +613,7 @@ function App() {
       h('div',{style:{background:SURFACE,border:'1px solid #FCA5A5',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
         h('div',{style:{fontSize:36,marginBottom:12}},'⚠️'),
         h('h3',{style:{color:'#B91C1C',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Borrar todos los equipos'),
-        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar ',h('strong',{style:{color:T1}},'todos los equipos de todas las categorías'),' de forma permanente, junto con sus resultados. Esta acción no se puede deshacer.'),
+        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar ',h('strong',{style:{color:T1}},'todos los equipos de Participativa y Competitiva'),' de forma permanente, junto con sus resultados (las categorías ocultas no se tocan). Esta acción no se puede deshacer.'),
         h('div',{style:{display:'flex',gap:10}},
           h('button',{onClick:()=>setShowConfirmTeams(false),style:{flex:1,padding:'11px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
           h('button',{onClick:handleClearTeams,disabled:clearingTeams,style:{flex:1,padding:'11px',background:'#DC2626',border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},
@@ -638,7 +674,7 @@ function App() {
         h('button',{onClick:()=>setATab('scores'),style:atS('scores')},'📊 Resultados'),
         h('button',{onClick:()=>setATab('config'),style:atS('config')},'⚙ Config')
       ),
-      aTab==='teams' &&h(TeamsPanel, {key:'t-'+curCat,teams:curTeams,onSave:saveTeams}),
+      aTab==='teams' &&h(TeamsPanel, {key:'t-'+selGender,teams:genderTeams,levels:LEVELS,genderLabel:selGender+' · '+GENDER_LABELS[selGender],onSave:saveTeams}),
       aTab==='scores'&&h(ScoresPanel,{key:'s-'+curCat,teams:curTeams,scores:curScores,config,onUpdate:updateScore}),
       aTab==='config'&&h(ConfigPanel,{config:baseConfig,onSave:saveConfig})
     ),
