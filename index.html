@@ -278,7 +278,8 @@ function ConfigPanel({config,onSave}) {
 }
 
 function TeamsPanel({teams,levels,genderLabel,onSave}) {
-  const [list,setList]=useState(teams.map(t=>({...t})));
+  const emptyMembers=()=>['','',''];
+  const [list,setList]=useState(teams.map(t=>({...t,members:t.members&&t.members.length===3?[...t.members]:emptyMembers()})));
   const [val,setVal]=useState('');
   const [editIdx,setEditIdx]=useState(null);
   const [editVal,setEditVal]=useState('');
@@ -289,7 +290,7 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
   const add=()=>{
     const t=val.trim();
     if(!t||list.some(x=>x.name.toLowerCase()===t.toLowerCase()))return;
-    const u=[...list,{name:t,level:null}]; setList(u); setVal(''); setDirty(true);
+    const u=[...list,{name:t,level:null,members:emptyMembers()}]; setList(u); setVal(''); setDirty(true);
   };
   const del=(name)=>{ const u=list.filter(x=>x.name!==name); setList(u); setDirty(true); };
   const startEdit=(i)=>{ setEditIdx(i); setEditVal(list[i].name); };
@@ -300,6 +301,15 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
   };
   const toggleLevel=(i,lv)=>{
     const u=list.map((x,j)=>j===i?{...x,level:x.level===lv?null:lv}:x); setList(u); setDirty(true);
+  };
+  const updateMember=(i,mi,memberVal)=>{
+    const u=list.map((x,j)=>{
+      if(j!==i)return x;
+      const members=x.members?[...x.members]:emptyMembers();
+      members[mi]=memberVal;
+      return {...x,members};
+    });
+    setList(u); setDirty(true);
   };
   const [saveError,setSaveError]=useState(false);
   const handleSave=async()=>{
@@ -356,6 +366,11 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
             h('span',{style:{fontSize:9,color:T5,letterSpacing:'0.05em'}},'Categoría:'),
             ...levels.map(lv=>h('button',{key:lv,onClick:()=>toggleLevel(i,lv),style:lvlPillS(t.level===lv)},lv)),
             !t.level&&h('span',{style:{fontSize:9,color:'#EA580C',fontStyle:'italic'}},'sin asignar')
+          ),
+          h('div',{style:{display:'flex',gap:6,marginTop:6}},
+            [0,1,2].map(mi=>h('input',{key:mi,value:(t.members&&t.members[mi])||'',onChange:e=>updateMember(i,mi,e.target.value),
+              placeholder:'Integrante '+(mi+1),
+              style:{flex:1,minWidth:0,background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T1,padding:'5px 8px',fontSize:11}}))
           )
         )
       ),
