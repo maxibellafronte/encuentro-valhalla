@@ -106,26 +106,20 @@ const BORDER_SOFT='#EDEFF2'; const BORDER='#E3E6EB'; const BORDER_STRONG='#D3D8D
 const T1='#171A1F'; const T2='#2E3440'; const T3='#5B6472'; const T4='#7B8494';
 const T5='#9AA2B0'; const T6='#AFB6C2'; const T7='#C2C8D1'; const T8='#D7DBE2';
 
-// Config base (WOD 3 se adapta por nivel en getConfig)
+// Config base: 11 WODs, cada uno con su propia unidad (se elige a mano
+// en el panel de admin — reps / metros / tiempo, ya no depende del nivel).
+const WOD_COUNT = 11;
 const BASE_CONFIG = {
   name: 'CROSSFIT COMPETITION',
-  events: [
-    {name:'WOD 1', lower:true,  unit:'tiempo'},
-    {name:'WOD 2', lower:false, unit:'reps'},
-    {name:'WOD 3', lower:false, unit:'reps'},  // se sobreescribe por nivel
-    {name:'WOD 4', lower:true,  unit:'tiempo'},
-  ]
+  events: Array.from({length:WOD_COUNT}, (_,i)=>({name:'WOD '+(i+1), unit:'tiempo', lower:true}))
 };
 
-// WOD 3: Scaled = reps | Advanced/RX = kg
-function getConfig(base, level) {
-  const isHeavy = level === 'Advanced' || level === 'RX' || level === 'Competitiva';
-  return {
-    ...base,
-    events: base.events.map((ev, i) =>
-      i === 2 ? {...ev, unit: isHeavy ? 'kg' : 'reps', lower: false} : ev
-    )
-  };
+// Completa configs viejas (guardadas con menos WODs) hasta llegar a WOD_COUNT,
+// sin tocar los que ya existen.
+function padEvents(cfg) {
+  const events=[...(cfg.events||[])];
+  while(events.length<WOD_COUNT) events.push({name:'WOD '+(events.length+1), unit:'tiempo', lower:true});
+  return {...cfg, events};
 }
 
 // ── Utilidades ────────────────────────────────────────────
@@ -142,6 +136,7 @@ function fmtRaw(val, unit) {
   if (val === null || val === undefined || val === '') return null;
   if (unit === 'kg') return val+' kg';
   if (unit === 'reps') return val+' reps';
+  if (unit === 'metros') return val+' m';
   return val;
 }
 
@@ -242,37 +237,35 @@ function LoginModal({onLogin,onClose}) {
   );
 }
 
+const WOD_UNITS=[
+  {key:'reps',   icon:'💪', label:'REPS',   bg:'#FDF4FF', border:'#A21CAF', color:'#86198F'},
+  {key:'metros', icon:'📏', label:'METROS', bg:'#ECFDF5', border:'#059669', color:'#047857'},
+  {key:'tiempo', icon:'⏱', label:'TIEMPO', bg:'#EFF6FF', border:'#1D4ED8', color:'#1D4ED8'},
+];
+
 function ConfigPanel({config,onSave}) {
   const [name,setName]=useState(config.name);
   const [events,setEvents]=useState(config.events.map(e=>({...e})));
-  const cycleUnit=(i)=>{
-    const cycle={tiempo:'reps',reps:'kg',kg:'tiempo'};
-    setEvents(prev=>prev.map((e,j)=>{ if(j!==i)return e; const nu=cycle[e.unit||'tiempo']; return{...e,unit:nu,lower:nu==='tiempo'}; }));
-  };
-  const us=(unit)=>{
-    if(unit==='tiempo')return{bg:'#EFF6FF',border:'#1D4ED8',color:'#1D4ED8',label:'⏱ TIEMPO'};
-    if(unit==='kg')    return{bg:'#FFF7ED',border:'#F97316',color:'#C2410C',label:'⚖️ KG'};
-    return                   {bg:'#FDF4FF',border:'#A21CAF',color:'#86198F',label:'💪 REPS'};
+  const setUnit=(i,unit)=>{
+    setEvents(prev=>prev.map((e,j)=>j===i?{...e,unit,lower:unit==='tiempo'}:e));
   };
   const inp={display:'block',width:'100%',background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T1,padding:'9px 11px',fontSize:13};
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}},'⚙ Configuración General'),
     h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:5}},'Nombre de la competencia'),
     h('input',{value:name,onChange:e=>setName(e.target.value),style:{...inp,fontSize:16,fontWeight:700,marginBottom:14}}),
-    h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:8}},'Nombres de los WODs'),
+    h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:8}},'WODs ('+events.length+')'),
     ...events.map((ev,i)=>{
-      const s=us(ev.unit||'tiempo');
-      const isWod3=i===2;
-      return h('div',{key:i,style:{background:SURFACE_ALT,border:'1px solid '+BORDER,borderRadius:8,padding:'10px 12px',marginBottom:8,display:'flex',gap:8,alignItems:'center'}},
-        h('input',{value:ev.name,onChange:e=>setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:e.target.value}:x)),placeholder:'WOD '+(i+1),style:{...inp,flex:1,padding:'7px 10px'}}),
-        isWod3
-          ? h('div',{style:{padding:'7px 11px',background:BORDER,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T4,fontSize:9,fontWeight:700,whiteSpace:'nowrap'}},'AUTO POR NIVEL')
-          : h('button',{onClick:()=>cycleUnit(i),style:{padding:'7px 11px',background:s.bg,border:'1px solid '+s.border,borderRadius:6,color:s.color,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'}},s.label)
+      const active=ev.unit||'tiempo';
+      return h('div',{key:i,style:{background:SURFACE_ALT,border:'1px solid '+BORDER,borderRadius:8,padding:'10px 12px',marginBottom:8}},
+        h('input',{value:ev.name,onChange:e=>setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:e.target.value}:x)),placeholder:'WOD '+(i+1),style:{...inp,marginBottom:8}}),
+        h('div',{style:{display:'flex',gap:6}},
+          WOD_UNITS.map(u=>h('button',{key:u.key,onClick:()=>setUnit(i,u.key),
+            style:{flex:1,padding:'7px 6px',background:active===u.key?u.bg:'none',border:'1px solid '+(active===u.key?u.border:BORDER_STRONG),borderRadius:6,color:active===u.key?u.color:T5,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'}
+          }, u.icon+' '+u.label))
+        )
       );
     }),
-    h('div',{style:{background:'#FFFBEB',border:'1px solid #FDE68A',borderRadius:8,padding:'10px 12px',marginBottom:10,fontSize:11,color:T3}},
-      '⚠️  WOD 3: se muestra como ',h('strong',{style:{color:'#86198F'}},'REPS'),' en Scaled/Beginner y como ',h('strong',{style:{color:'#C2410C'}},'KG'),' en Advanced/RX automáticamente.'
-    ),
     h('button',{onClick:()=>onSave({name,events}),style:{width:'100%',padding:'11px',background:GOLD,border:'none',borderRadius:8,color:'#fff',cursor:'pointer',fontSize:13,fontWeight:800}},'GUARDAR CONFIGURACIÓN')
   );
 }
@@ -395,9 +388,9 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
 
 function ScoresPanel({teams,scores,config,onUpdate}) {
   if(!teams.length)return h('div',{style:{padding:24,textAlign:'center',color:T6,fontSize:12}},'No hay equipos asignados a esta categoría todavía — agregalos y asignales la categoría en la pestaña "Equipos"');
-  const unitIcon =(u)=>u==='tiempo'?'⏱':u==='kg'?'⚖️':'💪';
-  const unitColor=(u)=>u==='tiempo'?'#1D4ED8':u==='kg'?'#C2410C':'#86198F';
-  const ph       =(u)=>u==='tiempo'?'1:23':u==='kg'?'kg':'reps';
+  const unitIcon =(u)=>u==='tiempo'?'⏱':u==='kg'?'⚖️':u==='metros'?'📏':'💪';
+  const unitColor=(u)=>u==='tiempo'?'#1D4ED8':u==='kg'?'#C2410C':u==='metros'?'#047857':'#86198F';
+  const ph       =(u)=>u==='tiempo'?'1:23':u==='kg'?'kg':u==='metros'?'metros':'reps';
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'📊 Carga de Resultados'),
     h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Tiempos en MM:SS — Peso/Reps como número. La app rankea automáticamente.'),
@@ -477,7 +470,7 @@ function App() {
   const genderTeams=teams[selGender]||[];               // todos los equipos de este género (cualquier categoría, incluso sin asignar)
   const curTeams=genderTeams.filter(t=>t.level===selLevel).map(t=>t.name); // solo los ya asignados a la categoría actual
   const curScores=scores[curCat]||{};
-  const config=getConfig(baseConfig,selLevel);
+  const config=baseConfig;
 
   // Sesión de admin: se restaura sola si ya había una guardada, y se mantiene
   // al día ante login/logout/renovación de token.
@@ -524,7 +517,7 @@ function App() {
         }
       }
 
-      if(cfg)setBaseConfig(cfg);
+      if(cfg)setBaseConfig(padEvents(cfg));
       setTeams(newTeams);
       setScores(newScores);
       setLoading(false);
@@ -668,11 +661,7 @@ function App() {
     h('div',{style:{padding:'10px 16px',background:SURFACE_ALT,borderBottom:'1px solid '+BORDER,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:6}},
       h('div',{style:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
         h('span',{style:{fontSize:15,fontWeight:800,color:T2,letterSpacing:'0.04em'}},curCat),
-        h('span',{style:{fontSize:11,color:T6}},curTeams.length+' equipos'),
-        selLevel==='Competitiva'
-          &&h('span',{style:{fontSize:9,color:'#C2410C',letterSpacing:'0.08em',fontWeight:600}},'WOD 3: ⚖️ KG'),
-        selLevel==='Participativa'
-          &&h('span',{style:{fontSize:9,color:'#86198F',letterSpacing:'0.08em',fontWeight:600}},'WOD 3: 💪 REPS')
+        h('span',{style:{fontSize:11,color:T6}},curTeams.length+' equipos')
       ),
       lb.length>0&&h('span',{style:{fontSize:9,color:GOLD,letterSpacing:'0.09em',fontWeight:700}},'CLASIFICACIÓN EN VIVO')
     ),
