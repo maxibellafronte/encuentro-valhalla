@@ -246,19 +246,40 @@ const WOD_UNITS=[
 function ConfigPanel({config,onSave}) {
   const [name,setName]=useState(config.name);
   const [events,setEvents]=useState(config.events.map(e=>({...e})));
+  const [dirty,setDirty]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [saved,setSaved]=useState(false);
+  const [error,setError]=useState(false);
   const setUnit=(i,unit)=>{
     setEvents(prev=>prev.map((e,j)=>j===i?{...e,unit,lower:unit==='tiempo'}:e));
+    setDirty(true);
+  };
+  const changeName=v=>{ setName(v); setDirty(true); };
+  const changeEventName=(i,v)=>{ setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:v}:x)); setDirty(true); };
+  const handleSave=async()=>{
+    setSaving(true); setError(false);
+    try{
+      await onSave({name,events});
+      setDirty(false); setSaved(true);
+      setTimeout(()=>setSaved(false),2500);
+    }catch(e){
+      console.error('Save failed:',e);
+      setError(true);
+      setTimeout(()=>setError(false),4000);
+    }finally{
+      setSaving(false);
+    }
   };
   const inp={display:'block',width:'100%',background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T1,padding:'9px 11px',fontSize:13};
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}},'⚙ Configuración General'),
     h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:5}},'Nombre de la competencia'),
-    h('input',{value:name,onChange:e=>setName(e.target.value),style:{...inp,fontSize:16,fontWeight:700,marginBottom:14}}),
+    h('input',{value:name,onChange:e=>changeName(e.target.value),style:{...inp,fontSize:16,fontWeight:700,marginBottom:14}}),
     h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:8}},'WODs ('+events.length+')'),
     ...events.map((ev,i)=>{
       const active=ev.unit||'tiempo';
       return h('div',{key:i,style:{background:SURFACE_ALT,border:'1px solid '+BORDER,borderRadius:8,padding:'10px 12px',marginBottom:8}},
-        h('input',{value:ev.name,onChange:e=>setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:e.target.value}:x)),placeholder:'WOD '+(i+1),style:{...inp,marginBottom:8}}),
+        h('input',{value:ev.name,onChange:e=>changeEventName(i,e.target.value),placeholder:'WOD '+(i+1),style:{...inp,marginBottom:8}}),
         h('div',{style:{display:'flex',gap:6}},
           WOD_UNITS.map(u=>h('button',{key:u.key,onClick:()=>setUnit(i,u.key),
             style:{flex:1,padding:'7px 6px',background:active===u.key?u.bg:'none',border:'1px solid '+(active===u.key?u.border:BORDER_STRONG),borderRadius:6,color:active===u.key?u.color:T5,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'}
@@ -266,7 +287,22 @@ function ConfigPanel({config,onSave}) {
         )
       );
     }),
-    h('button',{onClick:()=>onSave({name,events}),style:{width:'100%',padding:'11px',background:GOLD,border:'none',borderRadius:8,color:'#fff',cursor:'pointer',fontSize:13,fontWeight:800}},'GUARDAR CONFIGURACIÓN')
+    h('div',{style:{display:'flex',alignItems:'center',gap:10,marginTop:4}},
+      h('button',{
+        onClick:handleSave,
+        disabled:!dirty||saving,
+        style:{
+          flex:1, padding:'11px',
+          background:error?'#DC2626':saved?'#1D4ED8':dirty?GOLD:SURFACE_ALT,
+          border:'1px solid '+(error?'#EF4444':saved?'#1D4ED8':dirty?GOLD:BORDER),
+          borderRadius:8, color:dirty||saved||error?'white':T5,
+          cursor:dirty?'pointer':'default',
+          fontSize:13, fontWeight:800, letterSpacing:'0.02em',
+          transition:'all 0.2s'
+        }
+      }, saving?'GUARDANDO...':saved?'✓ GUARDADO':error?'✕ ERROR AL GUARDAR — REINTENTAR':dirty?'GUARDAR CONFIGURACIÓN':'SIN CAMBIOS PENDIENTES'),
+      dirty&&!saving&&h('span',{style:{fontSize:10,color:'#EA580C',letterSpacing:'0.06em',flexShrink:0}},'● sin guardar')
+    )
   );
 }
 
@@ -533,15 +569,12 @@ function App() {
     setSaving(false);
   };
 
-  // saveConfig: debounce corto (cambios manuales, sin race condition)
-  const saveConfig=(cfg)=>{
+  // saveConfig: guardado directo, devuelve promise para que ConfigPanel pueda hacer await
+  const saveConfig=async(cfg)=>{
     setBaseConfig(cfg);
     setSaving(true);
-    clearTimeout(scoreTimer.current['config']);
-    scoreTimer.current['config']=setTimeout(async()=>{
-      await dbSet('config',cfg);
-      setSaving(false);
-    },600);
+    await dbSet('config',cfg);
+    setSaving(false);
   };
 
   // updateScore: debounce mientras tipea
