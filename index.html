@@ -452,7 +452,7 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
   );
 }
 
-function Leaderboard({entries,config}) {
+function Leaderboard({entries,config,teamMembers}) {
   if(!entries.length)return h('div',{style:{textAlign:'center',color:T7,padding:'50px 0',fontSize:12,letterSpacing:'0.12em'}},'— SIN EQUIPOS REGISTRADOS —');
   const hasScores=config.events.some((_,ei)=>entries.some(e=>e.pts[ei]!==null));
   return h('div',{style:{overflowX:'auto',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10}},
@@ -465,9 +465,13 @@ function Leaderboard({entries,config}) {
       )),
       h('tbody',null,entries.map(e=>{
         const rowBg=e.rank===1?GOLD+'12':e.rank===2?SILVER+'0C':e.rank===3?BRONZE+'0C':'transparent';
+        const members=((teamMembers&&teamMembers[e.team])||[]).filter(m=>m&&m.trim());
         return h('tr',{key:e.team,style:{background:rowBg,borderBottom:'1px solid '+BORDER_SOFT}},
           h('td',{style:{padding:'12px 6px',textAlign:'center'}},h(RankBadge,{rank:e.rank})),
-          h('td',{style:{padding:'12px 12px',fontWeight:600,color:T2,fontSize:14}},e.team),
+          h('td',{style:{padding:'12px 12px'}},
+            h('div',{style:{fontWeight:600,color:T2,fontSize:14}},e.team),
+            members.length>0&&h('div',{style:{fontSize:10,color:T5,marginTop:2}},members.join(' · '))
+          ),
           ...config.events.map((ev,ei)=>{
             const rc=rankColor(e.rank);
             const rawFmt=e.raw&&e.raw[ei]!=null?fmtRaw(e.raw[ei],ev.unit):null;
@@ -505,6 +509,7 @@ function App() {
   const curCat=selLevel+' '+selGender;
   const genderTeams=teams[selGender]||[];               // todos los equipos de este género (cualquier categoría, incluso sin asignar)
   const curTeams=genderTeams.filter(t=>t.level===selLevel).map(t=>t.name); // solo los ya asignados a la categoría actual
+  const teamMembers={}; genderTeams.forEach(t=>{ teamMembers[t.name]=t.members||[]; }); // nombre -> integrantes
   const curScores=scores[curCat]||{};
   const config=baseConfig;
 
@@ -702,7 +707,7 @@ function App() {
     h('div',{style:{padding:14,flex:1}},
       loading
         ?h('div',{style:{textAlign:'center',padding:50,color:T6,letterSpacing:'0.1em',fontSize:12}},'CONECTANDO A BASE DE DATOS...')
-        :h(Leaderboard,{entries:lb,config})
+        :h(Leaderboard,{entries:lb,config,teamMembers})
     ),
 
     isAdmin&&h('div',{style:{margin:'0 14px 14px',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10,overflow:'hidden'}},
