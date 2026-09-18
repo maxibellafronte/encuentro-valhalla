@@ -519,7 +519,7 @@ function Leaderboard({entries,config,teamMembers}) {
 }
 
 function ScheduleLockScreen({items,onAdminClick}) {
-  return h('div',{style:{position:'fixed',inset:0,background:BG,display:'flex',flexDirection:'column',alignItems:'center',padding:'40px 16px',overflowY:'auto',zIndex:1000}},
+  return h('div',{style:{position:'fixed',inset:0,background:BG,display:'flex',flexDirection:'column',alignItems:'center',padding:'40px 16px',overflowY:'auto',zIndex:100}},
     h('div',{style:{fontSize:40,marginBottom:10}},'🏆'),
     h('h1',{style:{fontSize:22,fontWeight:900,color:T1,textAlign:'center',letterSpacing:'0.03em',margin:'0 0 4px'}},'PIEDRAS SPRING GAMES'),
     h('p',{style:{fontSize:11,color:T5,textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:24}},'Cronograma de la competencia'),
