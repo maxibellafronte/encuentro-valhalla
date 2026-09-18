@@ -106,6 +106,33 @@ const BORDER_SOFT='#EDEFF2'; const BORDER='#E3E6EB'; const BORDER_STRONG='#D3D8D
 const T1='#171A1F'; const T2='#2E3440'; const T3='#5B6472'; const T4='#7B8494';
 const T5='#9AA2B0'; const T6='#AFB6C2'; const T7='#C2C8D1'; const T8='#D7DBE2';
 
+// ── Cronograma temporal ───────────────────────────────────
+// Bloquea el sitio (menos para el admin logueado) mostrando el cronograma
+// a pantalla completa hasta esta fecha/hora (según el reloj del celular de
+// quien entra). Después se destraba solo y no hay que tocar nada más.
+// PLACEHOLDER: reemplazar SCHEDULE_ITEMS por el cronograma real cuando lo
+// tengan, y ajustar SCHEDULE_LOCK_UNTIL a la fecha/hora real del evento.
+const SCHEDULE_LOCK_UNTIL = new Date(2026, 8, 19, 10, 0, 0); // 19/09/2026 10:00 (hora local)
+const SCHEDULE_ITEMS = [
+  {time:'08:00', activity:'Apertura del box y acreditación de equipos'},
+  {time:'08:30', activity:'Charla técnica y repaso de reglas'},
+  {time:'09:00', activity:'WOD 1 — todas las categorías'},
+  {time:'09:45', activity:'WOD 2 — todas las categorías'},
+  {time:'10:30', activity:'Descanso corto'},
+  {time:'10:45', activity:'WOD 3 — todas las categorías'},
+  {time:'11:30', activity:'WOD 4 — todas las categorías'},
+  {time:'12:15', activity:'Almuerzo'},
+  {time:'13:30', activity:'WOD 5 — todas las categorías'},
+  {time:'14:15', activity:'WOD 6 — todas las categorías'},
+  {time:'15:00', activity:'WOD 7 — todas las categorías'},
+  {time:'15:45', activity:'Descanso corto'},
+  {time:'16:00', activity:'WOD 8 — todas las categorías'},
+  {time:'16:45', activity:'WOD 9 — todas las categorías'},
+  {time:'17:30', activity:'WOD 10 — todas las categorías'},
+  {time:'18:15', activity:'WOD 11 — Final'},
+  {time:'19:00', activity:'Premiación y cierre'},
+];
+
 // Config base: 11 WODs, cada uno con su propia unidad (se elige a mano
 // en el panel de admin — reps / metros / tiempo, ya no depende del nivel).
 const WOD_COUNT = 11;
@@ -491,6 +518,22 @@ function Leaderboard({entries,config,teamMembers}) {
   );
 }
 
+function ScheduleLockScreen({items,onAdminClick}) {
+  return h('div',{style:{position:'fixed',inset:0,background:BG,display:'flex',flexDirection:'column',alignItems:'center',padding:'40px 16px',overflowY:'auto',zIndex:1000}},
+    h('div',{style:{fontSize:40,marginBottom:10}},'🏆'),
+    h('h1',{style:{fontSize:22,fontWeight:900,color:T1,textAlign:'center',letterSpacing:'0.03em',margin:'0 0 4px'}},'PIEDRAS SPRING GAMES'),
+    h('p',{style:{fontSize:11,color:T5,textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:24}},'Cronograma de la competencia'),
+    h('div',{style:{width:'100%',maxWidth:420,background:SURFACE,border:'1px solid '+BORDER,borderRadius:12,overflow:'hidden'}},
+      items.map((it,i)=>h('div',{key:i,style:{display:'flex',gap:14,padding:'12px 16px',borderBottom:i<items.length-1?'1px solid '+BORDER_SOFT:'none'}},
+        h('div',{style:{fontWeight:800,color:GOLD,fontSize:13,minWidth:52,flexShrink:0}},it.time),
+        h('div',{style:{fontSize:13,color:T2}},it.activity)
+      ))
+    ),
+    h('p',{style:{fontSize:10,color:T6,marginTop:24,textAlign:'center',letterSpacing:'0.04em'}},'La tabla de posiciones se habilita automáticamente a partir de las 10:00 hs.'),
+    h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T7,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
+  );
+}
+
 // ── App ───────────────────────────────────────────────────
 function App() {
   const [selLevel,setSelLevel]=useState('Participativa');
@@ -501,10 +544,20 @@ function App() {
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [session,setSession]=useState(null);
+  const [sessionChecked,setSessionChecked]=useState(false);
   const isAdmin=!!session;
   const [showLogin,setShowLogin]=useState(false);
   const [aTab,setATab]=useState('teams');
   const scoreTimer=useRef({});
+
+  // Reloj para el bloqueo temporal del cronograma: se re-chequea solo, sin
+  // necesidad de refrescar la página, para destrabarse apenas pasa la hora.
+  const [now,setNow]=useState(()=>Date.now());
+  useEffect(()=>{
+    const id=setInterval(()=>setNow(Date.now()), 30000);
+    return ()=>clearInterval(id);
+  },[]);
+  const scheduleLocked = sessionChecked && !isAdmin && now < SCHEDULE_LOCK_UNTIL.getTime();
 
   const curCat=selLevel+' '+selGender;
   const genderTeams=teams[selGender]||[];               // todos los equipos de este género (cualquier categoría, incluso sin asignar)
@@ -516,7 +569,7 @@ function App() {
   // Sesión de admin: se restaura sola si ya había una guardada, y se mantiene
   // al día ante login/logout/renovación de token.
   useEffect(()=>{
-    sbClient.auth.getSession().then(({data})=>setSession(data.session));
+    sbClient.auth.getSession().then(({data})=>{ setSession(data.session); setSessionChecked(true); });
     const {data:sub}=sbClient.auth.onAuthStateChange((_event,newSession)=>setSession(newSession));
     return ()=>sub.subscription.unsubscribe();
   },[]);
@@ -628,6 +681,12 @@ function App() {
       setShowConfirmTeams(false);
     }
   };
+
+  if(!sessionChecked) return null;
+  if(scheduleLocked) return h(React.Fragment,null,
+    showLogin&&h(LoginModal,{onLogin:()=>setShowLogin(false),onClose:()=>setShowLogin(false)}),
+    h(ScheduleLockScreen,{items:SCHEDULE_ITEMS,onAdminClick:()=>setShowLogin(true)})
+  );
 
   const lb=calcLeaderboard(curTeams,curScores,config);
 
