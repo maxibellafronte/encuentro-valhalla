@@ -122,21 +122,14 @@ const SCHEDULE_ITEMS = [
   {time:'16:00', activity:'Premiación'},
 ];
 
-// Config base: 11 WODs, cada uno con su propia unidad (se elige a mano
-// en el panel de admin — reps / metros / tiempo, ya no depende del nivel).
-const WOD_COUNT = 11;
+// Config base: WODs de arranque para un deploy nuevo, cada uno con su
+// propia unidad (se elige a mano en el panel de admin — reps / metros /
+// tiempo). La cantidad de WODs se controla desde el panel de Config
+// (agregar / quitar el último), no es un número fijo.
 const BASE_CONFIG = {
   name: 'CROSSFIT COMPETITION',
-  events: Array.from({length:WOD_COUNT}, (_,i)=>({name:'WOD '+(i+1), unit:'tiempo', lower:true}))
+  events: Array.from({length:11}, (_,i)=>({name:'WOD '+(i+1), unit:'tiempo', lower:true}))
 };
-
-// Completa configs viejas (guardadas con menos WODs) hasta llegar a WOD_COUNT,
-// sin tocar los que ya existen.
-function padEvents(cfg) {
-  const events=[...(cfg.events||[])];
-  while(events.length<WOD_COUNT) events.push({name:'WOD '+(events.length+1), unit:'tiempo', lower:true});
-  return {...cfg, events};
-}
 
 // ── Utilidades ────────────────────────────────────────────
 function parseScore(s) {
@@ -293,6 +286,8 @@ function ConfigPanel({config,onSave}) {
   };
   const changeName=v=>{ setName(v); markChanged(); };
   const changeEventName=(i,v)=>{ setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:v}:x)); markChanged(); };
+  const addWod=()=>{ setEvents(prev=>[...prev,{name:'WOD '+(prev.length+1), unit:'tiempo', lower:true}]); markChanged(); };
+  const removeLastWod=()=>{ if(events.length<=1) return; setEvents(prev=>prev.slice(0,-1)); markChanged(); };
   const handleSave=async()=>{
     setSaving(true); setError(false);
     try{
@@ -325,6 +320,10 @@ function ConfigPanel({config,onSave}) {
         )
       );
     }),
+    h('div',{style:{display:'flex',gap:8,marginBottom:16}},
+      h('button',{onClick:addWod,style:{flex:1,padding:'9px',background:'none',border:'1px dashed '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:12,fontWeight:700}},'+ Agregar WOD'),
+      h('button',{onClick:removeLastWod,disabled:events.length<=1,style:{padding:'9px 14px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:events.length<=1?T7:'#B91C1C',cursor:events.length<=1?'default':'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap'}},'🗑 Quitar último')
+    ),
     h('div',{style:{display:'flex',alignItems:'center',gap:10,marginTop:4}},
       h('button',{
         onClick:handleSave,
@@ -654,7 +653,7 @@ function App() {
         }
       }
 
-      if(cfg)setBaseConfig(padEvents(cfg));
+      if(cfg)setBaseConfig(cfg);
       setTeams(newTeams);
       setScores(newScores);
       setLoading(false);
