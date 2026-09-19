@@ -110,27 +110,15 @@ const T5='#9AA2B0'; const T6='#AFB6C2'; const T7='#C2C8D1'; const T8='#D7DBE2';
 // Bloquea el sitio (menos para el admin logueado) mostrando el cronograma
 // a pantalla completa hasta esta fecha/hora (según el reloj del celular de
 // quien entra). Después se destraba solo y no hay que tocar nada más.
-// PLACEHOLDER: reemplazar SCHEDULE_ITEMS por el cronograma real cuando lo
-// tengan, y ajustar SCHEDULE_LOCK_UNTIL a la fecha/hora real del evento.
 const SCHEDULE_LOCK_UNTIL = new Date(2026, 8, 19, 10, 0, 0); // 19/09/2026 10:00 (hora local)
 const SCHEDULE_ITEMS = [
-  {time:'08:00', activity:'Apertura del box y acreditación de equipos'},
-  {time:'08:30', activity:'Charla técnica y repaso de reglas'},
-  {time:'09:00', activity:'WOD 1 — todas las categorías'},
-  {time:'09:45', activity:'WOD 2 — todas las categorías'},
-  {time:'10:30', activity:'Descanso corto'},
-  {time:'10:45', activity:'WOD 3 — todas las categorías'},
-  {time:'11:30', activity:'WOD 4 — todas las categorías'},
-  {time:'12:15', activity:'Almuerzo'},
-  {time:'13:30', activity:'WOD 5 — todas las categorías'},
-  {time:'14:15', activity:'WOD 6 — todas las categorías'},
-  {time:'15:00', activity:'WOD 7 — todas las categorías'},
-  {time:'15:45', activity:'Descanso corto'},
-  {time:'16:00', activity:'WOD 8 — todas las categorías'},
-  {time:'16:45', activity:'WOD 9 — todas las categorías'},
-  {time:'17:30', activity:'WOD 10 — todas las categorías'},
-  {time:'18:15', activity:'WOD 11 — Final'},
-  {time:'19:00', activity:'Premiación y cierre'},
+  {time:'10:00', activity:'Apertura del predio'},
+  {time:'10:30', activity:'Check In'},
+  {time:'11:15', activity:'Briefing y EEC'},
+  {time:'12:00 - 13:20', activity:'Categoría Participativa'},
+  {time:'', activity:'BREAK'},
+  {time:'14:00 - 15:20', activity:'Categoría Competitiva'},
+  {time:'16:00', activity:'Premiación'},
 ];
 
 // Config base: 11 WODs, cada uno con su propia unidad (se elige a mano
@@ -524,10 +512,13 @@ function ScheduleLockScreen({items,onAdminClick}) {
     h('h1',{style:{fontSize:22,fontWeight:900,color:T1,textAlign:'center',letterSpacing:'0.03em',margin:'0 0 4px'}},'PIEDRAS SPRING GAMES'),
     h('p',{style:{fontSize:11,color:T5,textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:24}},'Cronograma de la competencia'),
     h('div',{style:{width:'100%',maxWidth:420,background:SURFACE,border:'1px solid '+BORDER,borderRadius:12,overflow:'hidden'}},
-      items.map((it,i)=>h('div',{key:i,style:{display:'flex',gap:14,padding:'12px 16px',borderBottom:i<items.length-1?'1px solid '+BORDER_SOFT:'none'}},
-        h('div',{style:{fontWeight:800,color:GOLD,fontSize:13,minWidth:52,flexShrink:0}},it.time),
-        h('div',{style:{fontSize:13,color:T2}},it.activity)
-      ))
+      items.map((it,i)=>{
+        const isBreak=!it.time;
+        return h('div',{key:i,style:{display:'flex',gap:14,padding:'12px 16px',justifyContent:isBreak?'center':'flex-start',background:isBreak?SURFACE_ALT:'transparent',borderBottom:i<items.length-1?'1px solid '+BORDER_SOFT:'none'}},
+          !isBreak&&h('div',{style:{fontWeight:800,color:GOLD,fontSize:13,minWidth:92,flexShrink:0}},it.time),
+          h('div',{style:{fontSize:13,color:isBreak?T5:T2,fontStyle:isBreak?'italic':'normal',fontWeight:isBreak?700:400,letterSpacing:isBreak?'0.08em':'normal'}},it.activity)
+        );
+      })
     ),
     h('p',{style:{fontSize:10,color:T6,marginTop:24,textAlign:'center',letterSpacing:'0.04em'}},'La tabla de posiciones se habilita automáticamente a partir de las 10:00 hs.'),
     h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T7,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
