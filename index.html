@@ -110,7 +110,7 @@ const T5='#9AA2B0'; const T6='#AFB6C2'; const T7='#C2C8D1'; const T8='#D7DBE2';
 // Bloquea el sitio (menos para el admin logueado) mostrando el cronograma
 // a pantalla completa hasta esta fecha/hora (según el reloj del celular de
 // quien entra). Después se destraba solo y no hay que tocar nada más.
-const SCHEDULE_LOCK_UNTIL = new Date(2026, 8, 19, 10, 0, 0); // 19/09/2026 10:00 (hora local)
+const SCHEDULE_LOCK_UNTIL = new Date(2026, 8, 19, 12, 0, 0); // 19/09/2026 12:00 (hora local)
 const SCHEDULE_ITEMS = [
   {time:'10:00', activity:'Apertura del predio'},
   {time:'10:30', activity:'Check In'},
@@ -213,6 +213,25 @@ function calcLeaderboard(teams, scores, config) {
   }));
 }
 
+// Red de seguridad: si hay cambios sin guardar (dirty), los guarda solo
+// 1.2s después de la última edición (changeCount) y, si el panel se
+// desmonta antes de eso (p.ej. cambiaste de pestaña o de género sin
+// apretar "GUARDAR"), los manda igual antes de perderlos.
+function useAutoSave(changeCount, dirty, run) {
+  const runRef = useRef(run);
+  useEffect(()=>{ runRef.current = run; });
+  const dirtyRef = useRef(dirty);
+  useEffect(()=>{ dirtyRef.current = dirty; });
+
+  useEffect(()=>{
+    if (!dirty) return;
+    const t = setTimeout(()=>{ runRef.current(); }, 1200);
+    return ()=>clearTimeout(t);
+  }, [changeCount]);
+
+  useEffect(()=>()=>{ if (dirtyRef.current) runRef.current(); }, []);
+}
+
 // ── Components ────────────────────────────────────────────
 function RankBadge({rank}) {
   const icons={1:'🥇',2:'🥈',3:'🥉'};
@@ -262,15 +281,17 @@ function ConfigPanel({config,onSave}) {
   const [name,setName]=useState(config.name);
   const [events,setEvents]=useState(config.events.map(e=>({...e})));
   const [dirty,setDirty]=useState(false);
+  const [changeCount,setChangeCount]=useState(0);
   const [saving,setSaving]=useState(false);
   const [saved,setSaved]=useState(false);
   const [error,setError]=useState(false);
+  const markChanged=()=>{ setDirty(true); setChangeCount(c=>c+1); };
   const setUnit=(i,unit)=>{
     setEvents(prev=>prev.map((e,j)=>j===i?{...e,unit,lower:unit==='tiempo'}:e));
-    setDirty(true);
+    markChanged();
   };
-  const changeName=v=>{ setName(v); setDirty(true); };
-  const changeEventName=(i,v)=>{ setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:v}:x)); setDirty(true); };
+  const changeName=v=>{ setName(v); markChanged(); };
+  const changeEventName=(i,v)=>{ setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:v}:x)); markChanged(); };
   const handleSave=async()=>{
     setSaving(true); setError(false);
     try{
@@ -285,6 +306,7 @@ function ConfigPanel({config,onSave}) {
       setSaving(false);
     }
   };
+  useAutoSave(changeCount, dirty, handleSave);
   const inp={display:'block',width:'100%',background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T1,padding:'9px 11px',fontSize:13};
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}},'⚙ Configuración General'),
@@ -328,23 +350,30 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
   const [editIdx,setEditIdx]=useState(null);
   const [editVal,setEditVal]=useState('');
   const [dirty,setDirty]=useState(false);
+  const [changeCount,setChangeCount]=useState(0);
   const [savingLocal,setSavingLocal]=useState(false);
   const [saved,setSaved]=useState(false);
+  const [addError,setAddError]=useState('');
+  const [editError,setEditError]=useState('');
+  const markChanged=()=>{ setDirty(true); setChangeCount(c=>c+1); };
 
   const add=()=>{
     const t=val.trim();
-    if(!t||list.some(x=>x.name.toLowerCase()===t.toLowerCase()))return;
-    const u=[...list,{name:t,level:null,members:emptyMembers()}]; setList(u); setVal(''); setDirty(true);
+    if(!t){ setAddError('Escribí un nombre'); return; }
+    if(list.some(x=>x.name.toLowerCase()===t.toLowerCase())){ setAddError('Ya existe un equipo con ese nombre'); return; }
+    setAddError('');
+    const u=[...list,{name:t,level:null,members:emptyMembers()}]; setList(u); setVal(''); markChanged();
   };
-  const del=(name)=>{ const u=list.filter(x=>x.name!==name); setList(u); setDirty(true); };
-  const startEdit=(i)=>{ setEditIdx(i); setEditVal(list[i].name); };
+  const del=(name)=>{ const u=list.filter(x=>x.name!==name); setList(u); markChanged(); };
+  const startEdit=(i)=>{ setEditIdx(i); setEditVal(list[i].name); setEditError(''); };
   const confirmEdit=(i)=>{
     const t=editVal.trim();
-    if(!t||list.some((x,j)=>j!==i&&x.name.toLowerCase()===t.toLowerCase())){setEditIdx(null);return;}
-    const u=list.map((x,j)=>j===i?{...x,name:t}:x); setList(u); setDirty(true); setEditIdx(null);
+    if(!t){ setEditError('Escribí un nombre'); return; }
+    if(list.some((x,j)=>j!==i&&x.name.toLowerCase()===t.toLowerCase())){ setEditError('Ya existe un equipo con ese nombre'); return; }
+    const u=list.map((x,j)=>j===i?{...x,name:t}:x); setList(u); markChanged(); setEditIdx(null); setEditError('');
   };
   const toggleLevel=(i,lv)=>{
-    const u=list.map((x,j)=>j===i?{...x,level:x.level===lv?null:lv}:x); setList(u); setDirty(true);
+    const u=list.map((x,j)=>j===i?{...x,level:x.level===lv?null:lv}:x); setList(u); markChanged();
   };
   const updateMember=(i,mi,memberVal)=>{
     const u=list.map((x,j)=>{
@@ -353,7 +382,7 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
       members[mi]=memberVal;
       return {...x,members};
     });
-    setList(u); setDirty(true);
+    setList(u); markChanged();
   };
   const [saveError,setSaveError]=useState(false);
   const handleSave=async()=>{
@@ -372,17 +401,19 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
       setSavingLocal(false);
     }
   };
+  useAutoSave(changeCount, dirty, handleSave);
 
   const unassigned=list.filter(x=>!x.level).length;
   const lvlPillS=(active)=>({padding:'4px 10px',background:active?GOLD+'14':'none',border:'1px solid '+(active?GOLD:BORDER_STRONG),borderRadius:5,color:active?GOLD:T5,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'});
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'👥 Equipos · '+genderLabel),
     h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Podés cargar el equipo sin definir la categoría y asignarla después con los botones de abajo.'+(unassigned?' · '+unassigned+' sin asignar':'')),
-    h('div',{style:{display:'flex',gap:8,marginBottom:14}},
-      h('input',{value:val,onChange:e=>setVal(e.target.value),onKeyDown:e=>e.key==='Enter'&&add(),placeholder:'Nombre del equipo...',
-        style:{flex:1,background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T1,padding:'10px 12px',fontSize:13}}),
+    h('div',{style:{display:'flex',gap:8,marginBottom:addError?6:14}},
+      h('input',{value:val,onChange:e=>{setVal(e.target.value);setAddError('');},onKeyDown:e=>e.key==='Enter'&&add(),placeholder:'Nombre del equipo...',
+        style:{flex:1,background:FIELD_BG,border:'1px solid '+(addError?ACCENT:BORDER_STRONG),borderRadius:8,color:T1,padding:'10px 12px',fontSize:13}}),
       h('button',{onClick:add,style:{padding:'10px 16px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},'+ Añadir')
     ),
+    addError&&h('p',{style:{color:ACCENT,fontSize:11,margin:'0 0 14px'}},addError),
     !list.length
       ?h('div',{style:{textAlign:'center',color:T6,padding:'20px 0',fontSize:12,letterSpacing:'0.1em'}},'Sin equipos cargados')
       :list.map((t,i)=>
@@ -391,9 +422,12 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
             h('div',{style:{display:'flex',alignItems:'center',gap:10,flex:1,minWidth:0}},
               h('span',{style:{color:T6,fontSize:11,fontWeight:700,flexShrink:0}},(i+1)+'.'),
               editIdx===i
-                ?h('input',{value:editVal,autoFocus:true,onChange:e=>setEditVal(e.target.value),
-                    onKeyDown:e=>{if(e.key==='Enter')confirmEdit(i);if(e.key==='Escape')setEditIdx(null);},
-                    style:{flex:1,background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T1,padding:'5px 9px',fontSize:13}})
+                ?h('div',{style:{flex:1,minWidth:0}},
+                    h('input',{value:editVal,autoFocus:true,onChange:e=>{setEditVal(e.target.value);setEditError('');},
+                        onKeyDown:e=>{if(e.key==='Enter')confirmEdit(i);if(e.key==='Escape')setEditIdx(null);},
+                        style:{width:'100%',background:SURFACE,border:'1px solid '+(editError?ACCENT:BORDER_STRONG),borderRadius:5,color:T1,padding:'5px 9px',fontSize:13}}),
+                    editError&&h('p',{style:{color:ACCENT,fontSize:10,margin:'4px 0 0'}},editError)
+                  )
                 :h('span',{style:{color:T2,fontSize:13,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},t.name)
             ),
             editIdx===i
@@ -520,7 +554,7 @@ function ScheduleLockScreen({items,onAdminClick}) {
         );
       })
     ),
-    h('p',{style:{fontSize:10,color:T6,marginTop:24,textAlign:'center',letterSpacing:'0.04em'}},'La tabla de posiciones se habilita automáticamente a partir de las 10:00 hs.'),
+    h('p',{style:{fontSize:10,color:T6,marginTop:24,textAlign:'center',letterSpacing:'0.04em'}},'La tabla de posiciones se habilita automáticamente a partir de las 12:00 hs.'),
     h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T7,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
   );
 }
