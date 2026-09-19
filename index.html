@@ -501,10 +501,12 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
   );
 }
 
-function Leaderboard({entries,config,teamMembers}) {
+function Leaderboard({entries,config,teamMembers,canReorder,onMove}) {
   if(!entries.length)return h('div',{style:{textAlign:'center',color:T7,padding:'50px 0',fontSize:12,letterSpacing:'0.12em'}},'— SIN EQUIPOS REGISTRADOS —');
   const hasScores=config.events.some((_,ei)=>entries.some(e=>e.pts[ei]!==null));
+  const showReorder=canReorder&&!hasScores;
   return h('div',{style:{overflowX:'auto',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10}},
+    showReorder&&h('div',{style:{padding:'8px 12px',fontSize:10,color:T5,letterSpacing:'0.04em',borderBottom:'1px solid '+BORDER_SOFT}},'📌 Sin resultados cargados todavía — podés reordenar los equipos con las flechas. Apenas se cargue el primer resultado, el orden pasa a ser automático.'),
     h('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:13}},
       h('thead',null,h('tr',null,
         h('th',{style:{width:48,padding:'9px 6px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER}},'#'),
@@ -512,11 +514,18 @@ function Leaderboard({entries,config,teamMembers}) {
         ...config.events.map((ev,ei)=>h('th',{key:ei,style:{padding:'9px 8px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},ev.name)),
         hasScores&&h('th',{style:{padding:'9px 12px',textAlign:'center',color:GOLD,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'TOTAL')
       )),
-      h('tbody',null,entries.map(e=>{
+      h('tbody',null,entries.map((e,idx)=>{
         const rowBg=e.rank===1?GOLD+'12':e.rank===2?SILVER+'0C':e.rank===3?BRONZE+'0C':'transparent';
         const members=((teamMembers&&teamMembers[e.team])||[]).filter(m=>m&&m.trim());
         return h('tr',{key:e.team,style:{background:rowBg,borderBottom:'1px solid '+BORDER_SOFT}},
-          h('td',{style:{padding:'12px 6px',textAlign:'center'}},h(RankBadge,{rank:e.rank})),
+          h('td',{style:{padding:'12px 6px',textAlign:'center'}},
+            showReorder
+              ?h('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:2}},
+                  h('button',{onClick:()=>onMove(e.team,-1),disabled:idx===0,style:{background:'none',border:'none',cursor:idx===0?'default':'pointer',color:idx===0?T8:T4,fontSize:12,padding:0,lineHeight:1}},'▲'),
+                  h('button',{onClick:()=>onMove(e.team,1),disabled:idx===entries.length-1,style:{background:'none',border:'none',cursor:idx===entries.length-1?'default':'pointer',color:idx===entries.length-1?T8:T4,fontSize:12,padding:0,lineHeight:1}},'▼')
+                )
+              :h(RankBadge,{rank:e.rank})
+          ),
           h('td',{style:{padding:'12px 12px'}},
             h('div',{style:{fontWeight:600,color:T2,fontSize:14}},e.team),
             members.length>0&&h('div',{style:{fontSize:10,color:T5,marginTop:2}},members.join(' · '))
@@ -669,6 +678,20 @@ function App() {
     setSaving(false);
   };
 
+  // moveTeam: reordena el orden de exhibición (solo tiene efecto visible
+  // mientras no haya resultados cargados; apenas hay puntajes, el orden
+  // real pasa a decidirlo calcLeaderboard).
+  const moveTeam=(name,dir)=>{
+    const idx=curTeams.indexOf(name);
+    const otherName=curTeams[idx+dir];
+    if(!otherName) return;
+    const newGenderTeams=[...genderTeams];
+    const i1=newGenderTeams.findIndex(t=>t.name===name);
+    const i2=newGenderTeams.findIndex(t=>t.name===otherName);
+    [newGenderTeams[i1],newGenderTeams[i2]]=[newGenderTeams[i2],newGenderTeams[i1]];
+    saveTeams(newGenderTeams);
+  };
+
   // saveConfig: guardado directo, devuelve promise para que ConfigPanel pueda hacer await
   const saveConfig=async(cfg)=>{
     setBaseConfig(cfg);
@@ -812,7 +835,7 @@ function App() {
     h('div',{style:{padding:14,flex:1}},
       loading
         ?h('div',{style:{textAlign:'center',padding:50,color:T6,letterSpacing:'0.1em',fontSize:12}},'CONECTANDO A BASE DE DATOS...')
-        :h(Leaderboard,{entries:lb,config,teamMembers})
+        :h(Leaderboard,{entries:lb,config,teamMembers,canReorder:isAdmin,onMove:moveTeam})
     ),
 
     isAdmin&&h('div',{style:{margin:'0 14px 14px',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10,overflow:'hidden'}},
