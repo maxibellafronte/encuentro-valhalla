@@ -106,10 +106,11 @@ const BORDER_SOFT='#EDEFF2'; const BORDER='#E3E6EB'; const BORDER_STRONG='#D3D8D
 const T1='#171A1F'; const T2='#2E3440'; const T3='#5B6472'; const T4='#7B8494';
 const T5='#9AA2B0'; const T6='#AFB6C2'; const T7='#C2C8D1'; const T8='#D7DBE2';
 
-// ── Cronograma temporal ───────────────────────────────────
-// Bloquea el sitio (menos para el admin logueado) mostrando el cronograma
-// a pantalla completa hasta esta fecha/hora (según el reloj del celular de
-// quien entra). Después se destraba solo y no hay que tocar nada más.
+// ── Cronograma ────────────────────────────────────────────
+// SCHEDULE_LOCK_ENABLED=false: el cronograma se ve por el botón de la
+// cabecera, sin tapar el leaderboard. Poniéndolo en true de nuevo, vuelve
+// a bloquear el sitio (menos al admin logueado) hasta SCHEDULE_LOCK_UNTIL.
+const SCHEDULE_LOCK_ENABLED = false;
 const SCHEDULE_LOCK_UNTIL = new Date(2026, 8, 19, 12, 0, 0); // 19/09/2026 12:00 (hora local)
 const SCHEDULE_ITEMS = [
   {time:'10:00', activity:'Apertura del predio'},
@@ -540,22 +541,38 @@ function Leaderboard({entries,config,teamMembers}) {
   );
 }
 
+function ScheduleList({items}) {
+  return h('div',{style:{width:'100%',background:SURFACE,border:'1px solid '+BORDER,borderRadius:12,overflow:'hidden'}},
+    items.map((it,i)=>{
+      const isBreak=!it.time;
+      return h('div',{key:i,style:{display:'flex',gap:14,padding:'12px 16px',justifyContent:isBreak?'center':'flex-start',background:isBreak?SURFACE_ALT:'transparent',borderBottom:i<items.length-1?'1px solid '+BORDER_SOFT:'none'}},
+        !isBreak&&h('div',{style:{fontWeight:800,color:GOLD,fontSize:13,minWidth:92,flexShrink:0}},it.time),
+        h('div',{style:{fontSize:13,color:isBreak?T5:T2,fontStyle:isBreak?'italic':'normal',fontWeight:isBreak?700:400,letterSpacing:isBreak?'0.08em':'normal'}},it.activity)
+      );
+    })
+  );
+}
+
 function ScheduleLockScreen({items,onAdminClick}) {
   return h('div',{style:{position:'fixed',inset:0,background:BG,display:'flex',flexDirection:'column',alignItems:'center',padding:'40px 16px',overflowY:'auto',zIndex:100}},
     h('div',{style:{fontSize:40,marginBottom:10}},'🏆'),
     h('h1',{style:{fontSize:22,fontWeight:900,color:T1,textAlign:'center',letterSpacing:'0.03em',margin:'0 0 4px'}},'PIEDRAS SPRING GAMES'),
     h('p',{style:{fontSize:11,color:T5,textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:24}},'Cronograma de la competencia'),
-    h('div',{style:{width:'100%',maxWidth:420,background:SURFACE,border:'1px solid '+BORDER,borderRadius:12,overflow:'hidden'}},
-      items.map((it,i)=>{
-        const isBreak=!it.time;
-        return h('div',{key:i,style:{display:'flex',gap:14,padding:'12px 16px',justifyContent:isBreak?'center':'flex-start',background:isBreak?SURFACE_ALT:'transparent',borderBottom:i<items.length-1?'1px solid '+BORDER_SOFT:'none'}},
-          !isBreak&&h('div',{style:{fontWeight:800,color:GOLD,fontSize:13,minWidth:92,flexShrink:0}},it.time),
-          h('div',{style:{fontSize:13,color:isBreak?T5:T2,fontStyle:isBreak?'italic':'normal',fontWeight:isBreak?700:400,letterSpacing:isBreak?'0.08em':'normal'}},it.activity)
-        );
-      })
-    ),
+    h('div',{style:{width:'100%',maxWidth:420}},h(ScheduleList,{items})),
     h('p',{style:{fontSize:10,color:T6,marginTop:24,textAlign:'center',letterSpacing:'0.04em'}},'La tabla de posiciones se habilita automáticamente a partir de las 12:00 hs.'),
     h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T7,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
+  );
+}
+
+function ScheduleModal({items,onClose}) {
+  return h('div',{onClick:onClose,style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16}},
+    h('div',{onClick:e=>e.stopPropagation(),style:{background:BG,border:'1px solid '+BORDER_STRONG,borderRadius:12,padding:24,width:'min(420px,100%)',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
+        h('h3',{style:{color:T1,fontSize:15,fontWeight:800,margin:0,letterSpacing:'0.02em'}},'📅 Cronograma'),
+        h('button',{onClick:onClose,style:{background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T4,cursor:'pointer',fontSize:13,padding:'4px 9px'}},'✕')
+      ),
+      h(ScheduleList,{items})
+    )
   );
 }
 
@@ -572,6 +589,7 @@ function App() {
   const [sessionChecked,setSessionChecked]=useState(false);
   const isAdmin=!!session;
   const [showLogin,setShowLogin]=useState(false);
+  const [showSchedule,setShowSchedule]=useState(false);
   const [aTab,setATab]=useState('teams');
   const scoreTimer=useRef({});
 
@@ -582,7 +600,7 @@ function App() {
     const id=setInterval(()=>setNow(Date.now()), 30000);
     return ()=>clearInterval(id);
   },[]);
-  const scheduleLocked = sessionChecked && !isAdmin && now < SCHEDULE_LOCK_UNTIL.getTime();
+  const scheduleLocked = SCHEDULE_LOCK_ENABLED && sessionChecked && !isAdmin && now < SCHEDULE_LOCK_UNTIL.getTime();
 
   const curCat=selLevel+' '+selGender;
   const genderTeams=teams[selGender]||[];               // todos los equipos de este género (cualquier categoría, incluso sin asignar)
@@ -722,6 +740,7 @@ function App() {
   return h('div',{style:{minHeight:'100vh',display:'flex',flexDirection:'column'}},
 
     showLogin&&h(LoginModal,{onLogin:()=>setShowLogin(false),onClose:()=>setShowLogin(false)}),
+    showSchedule&&h(ScheduleModal,{items:SCHEDULE_ITEMS,onClose:()=>setShowSchedule(false)}),
 
     // Confirm modal (limpiar resultados)
     showConfirm&&h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:500}},
@@ -755,7 +774,10 @@ function App() {
     h('div',{style:{background:SURFACE,borderBottom:'1px solid '+BORDER,padding:'14px 16px'}},
       h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}},
         h('div',null,
-          h('div',{style:{fontSize:20,fontWeight:900,color:T1,letterSpacing:'0.05em'}},'🏆 '+(loading?'...':baseConfig.name)),
+          h('div',{style:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
+            h('div',{style:{fontSize:20,fontWeight:900,color:T1,letterSpacing:'0.05em'}},'🏆 '+(loading?'...':baseConfig.name)),
+            h('button',{onClick:()=>setShowSchedule(true),style:{background:SURFACE_ALT,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T3,cursor:'pointer',fontSize:11,padding:'5px 11px',fontWeight:700,letterSpacing:'0.03em',whiteSpace:'nowrap'}},'📅 Cronograma')
+          ),
           saving&&h('div',{style:{fontSize:9,color:T5,letterSpacing:'0.08em',marginTop:3}},'GUARDANDO...')
         ),
         h('div',{style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}},
