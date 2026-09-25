@@ -572,6 +572,15 @@ function ScheduleLockScreen({items,onAdminClick}) {
   );
 }
 
+function HiddenScreen({onAdminClick}) {
+  return h('div',{style:{position:'fixed',inset:0,background:BG,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'40px 16px',zIndex:100}},
+    h('div',{style:{fontSize:40,marginBottom:14}},'🏆'),
+    h('h1',{style:{fontSize:19,fontWeight:900,color:T1,textAlign:'center',letterSpacing:'0.02em',margin:'0 0 6px',maxWidth:380}},'Leaderboard oculto por la organización'),
+    h('p',{style:{fontSize:12,color:T5,textAlign:'center'}},'Volvé a intentarlo más tarde.'),
+    h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T7,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
+  );
+}
+
 function ScheduleModal({items,onClose}) {
   return h('div',{onClick:onClose,style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16}},
     h('div',{onClick:e=>e.stopPropagation(),style:{background:BG,border:'1px solid '+BORDER_STRONG,borderRadius:12,padding:24,width:'min(420px,100%)',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
@@ -598,6 +607,7 @@ function App() {
   const isAdmin=!!session;
   const [showLogin,setShowLogin]=useState(false);
   const [showSchedule,setShowSchedule]=useState(false);
+  const [siteHidden,setSiteHidden]=useState(false);
   const [aTab,setATab]=useState('teams');
   const scoreTimer=useRef({});
 
@@ -609,6 +619,7 @@ function App() {
     return ()=>clearInterval(id);
   },[]);
   const scheduleLocked = SCHEDULE_LOCK_ENABLED && sessionChecked && !isAdmin && now < SCHEDULE_LOCK_UNTIL.getTime();
+  const publicHidden = sessionChecked && !isAdmin && siteHidden;
 
   const curCat=selLevel+' '+selGender;
   const genderTeams=teams[selGender]||[];               // todos los equipos de este género (cualquier categoría, incluso sin asignar)
@@ -632,6 +643,7 @@ function App() {
       const all=LEVELS.flatMap(l=>GENDERS.map(g=>l+' '+g));
       const results=await Promise.all([
         dbGet('config').then(d=>['config',null,d]),
+        dbGet('hidden').then(d=>['hidden',null,d]),
         ...GENDERS.map(g=>dbGet('teams:'+g).then(d=>['teams',g,d])),
         ...all.map(cat=>dbGet('scores:'+cat).then(d=>['scores',cat,d])),
       ]);
@@ -639,6 +651,7 @@ function App() {
       const newTeams={};const newScores={};
       results.forEach(([type,key,data])=>{
         if(type==='config'){ cfg=data; return; }
+        if(type==='hidden'){ setSiteHidden(!!data); return; }
         if(!data)return;
         if(type==='teams') newTeams[key]=Array.isArray(data)?data:[];
         if(type==='scores') newScores[key]=data;
@@ -700,6 +713,17 @@ function App() {
     setSaving(false);
   };
 
+  // toggleHidden: oculta/muestra el leaderboard para todo el mundo menos
+  // el admin logueado. Se guarda en la base, así que aplica para cualquiera
+  // que entre, no solo en este navegador.
+  const toggleHidden=async()=>{
+    const next=!siteHidden;
+    setSiteHidden(next);
+    setSaving(true);
+    await dbSet('hidden', next);
+    setSaving(false);
+  };
+
   // updateScore: debounce mientras tipea
   const updateScore=(ei,team,val)=>{
     const key='scores:'+curCat;
@@ -752,6 +776,10 @@ function App() {
     showLogin&&h(LoginModal,{onLogin:()=>setShowLogin(false),onClose:()=>setShowLogin(false)}),
     h(ScheduleLockScreen,{items:SCHEDULE_ITEMS,onAdminClick:()=>setShowLogin(true)})
   );
+  if(publicHidden) return h(React.Fragment,null,
+    showLogin&&h(LoginModal,{onLogin:()=>setShowLogin(false),onClose:()=>setShowLogin(false)}),
+    h(HiddenScreen,{onAdminClick:()=>setShowLogin(true)})
+  );
 
   const lb=calcLeaderboard(curTeams,curScores,config);
 
@@ -803,6 +831,10 @@ function App() {
           saving&&h('div',{style:{fontSize:9,color:T5,letterSpacing:'0.08em',marginTop:3}},'GUARDANDO...')
         ),
         h('div',{style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}},
+          isAdmin&&h('button',{
+            onClick:toggleHidden,
+            style:{background:siteHidden?'#FFFBEB':SURFACE_ALT,border:'1px solid '+(siteHidden?'#F59E0B':BORDER_STRONG),borderRadius:6,color:siteHidden?'#92400E':T3,cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
+          },siteHidden?'👁 Mostrar':'🙈 Ocultar'),
           isAdmin&&h('button',{
             onClick:()=>setShowConfirmTeams(true),
             style:{background:'#FEF2F2',border:'1px solid #DC2626',borderRadius:6,color:'#B91C1C',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
