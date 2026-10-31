@@ -142,12 +142,23 @@ function parseScore(s) {
   return isNaN(n) ? null : n;
 }
 
-function fmtRaw(val, unit) {
-  if (val === null || val === undefined || val === '') return null;
-  if (unit === 'kg') return val+' kg';
-  if (unit === 'reps') return val+' reps';
-  if (unit === 'metros') return val+' m';
-  return val;
+// Segundos -> m:ss (con signo si es negativo, p. ej. un error de carga).
+function fmtDur(sec) {
+  const s = Math.round(Math.abs(sec));
+  return (sec < 0 ? '-' : '') + Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+
+// Los tiempos cargados son ACUMULADOS (reloj corrido hasta cada estación).
+// El tiempo de cada tramo es estación k − estación k−1 (la 1ª es el valor tal
+// cual). Solo informativo: no entra en el puntaje. null si falta algún dato.
+function calcIntervals(raw) {
+  return raw.map((r,k)=>{
+    const cur = parseScore(r);
+    if (cur === null) return null;
+    if (k === 0) return cur;
+    const prev = parseScore(raw[k-1]);
+    return prev === null ? null : cur - prev;
+  });
 }
 
 function rankColor(rank) {
@@ -300,7 +311,7 @@ function ConfigPanel({config,onSave}) {
     h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:5}},'Nombre de la competencia'),
     h('input',{value:name,onChange:e=>changeName(e.target.value),style:{...inp,fontSize:16,fontWeight:700,marginBottom:14}}),
     h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:4}},'Estaciones ('+events.length+')'),
-    h('p',{style:{fontSize:11,color:T5,marginBottom:10}},'⏱ Todas las estaciones se cargan en tiempo (mm:ss) — gana el menor tiempo.'),
+    h('p',{style:{fontSize:11,color:T5,marginBottom:10}},'⏱ Los tiempos se cargan acumulados (mm:ss); la última estación lleva el tiempo total. La tabla muestra el tiempo de cada tramo.'),
     ...events.map((ev,i)=>
       h('div',{key:i,style:{background:SURFACE_ALT,border:'1px solid '+BORDER,borderRadius:8,padding:'10px 12px',marginBottom:8}},
         h('input',{value:ev.name,onChange:e=>changeEventName(i,e.target.value),placeholder:'Estación '+(i+1),style:inp})
@@ -479,12 +490,12 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
   const ph       =(u)=>u==='tiempo'?'1:23':u==='kg'?'kg':u==='metros'?'metros':'reps';
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'📊 Carga de Resultados'),
-    h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Tiempos en MM:SS (ej. 3:45). La app rankea automáticamente.'),
+    h('p',{style:{fontSize:11,color:T5,marginBottom:14,lineHeight:1.5}},'Cargá el tiempo ACUMULADO en MM:SS (ej. 3:45) al terminar cada estación; en la última, el tiempo total. La tabla muestra el tiempo de cada tramo (estación − anterior) y rankea automáticamente.'),
     h('div',{style:{overflowX:'auto'}},
       h('table',{style:{width:'100%',borderCollapse:'collapse'}},
         h('thead',null,h('tr',null,
           h('th',{style:{textAlign:'left',padding:'8px 10px',color:T5,fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER}},'Equipo'),
-          ...config.events.map((ev,ei)=>h('th',{key:ei,style:{padding:'8px 10px',textAlign:'center',color:unitColor(ev.unit),fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},ev.name+' '+unitIcon(ev.unit)))
+          ...config.events.map((ev,ei)=>h('th',{key:ei,style:{padding:'8px 10px',textAlign:'center',color:unitColor(ev.unit),fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},ev.name+' '+unitIcon(ev.unit)+(ei===config.events.length-1?' · TOTAL':'')))
         )),
         h('tbody',null,teams.map(team=>h('tr',{key:team,style:{borderBottom:'1px solid '+BORDER_SOFT}},
           h('td',{style:{padding:'8px 10px',color:T2,fontWeight:600,fontSize:13,whiteSpace:'nowrap'}},team),
@@ -513,11 +524,14 @@ function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove
         h('th',{style:{width:48,padding:'9px 6px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER}},'#'),
         h('th',{style:{textAlign:'left',padding:'9px 12px',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER}},'Equipo'),
         ...config.events.map((ev,ei)=>h('th',{key:ei,style:{padding:'9px 8px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},ev.name)),
-        hasScores&&h('th',{style:{padding:'9px 12px',textAlign:'center',color:GOLD,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'TOTAL')
+        hasScores&&h('th',{style:{padding:'9px 10px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'Tiempo total'),
+        hasScores&&h('th',{style:{padding:'9px 12px',textAlign:'center',color:GOLD,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'PUNTOS')
       )),
       h('tbody',null,entries.map((e,idx)=>{
         const rowBg=e.rank===1?GOLD+'12':e.rank===2?SILVER+'0C':e.rank===3?BRONZE+'0C':'transparent';
         const members=((teamMembers&&teamMembers[e.team])||[]).filter(m=>m&&m.trim());
+        const intervals=calcIntervals(e.raw||[]);
+        const totalSec=e.raw?parseScore(e.raw[e.raw.length-1]):null; // la última estación se carga con el tiempo total
         return h('tr',{key:e.team,style:{background:rowBg,borderBottom:'1px solid '+BORDER_SOFT}},
           h('td',{style:{padding:'12px 6px',textAlign:'center'}},
             showReorder
@@ -536,16 +550,17 @@ function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove
           ),
           ...config.events.map((ev,ei)=>{
             const rc=rankColor(e.rank);
-            const rawFmt=e.raw&&e.raw[ei]!=null?fmtRaw(e.raw[ei],ev.unit):null;
+            const iv=intervals[ei];
             return h('td',{key:ei,style:{padding:'12px 8px',textAlign:'center'}},
               e.pts[ei]!==null
                 ?h('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:3}},
                     h('div',{style:{display:'inline-flex',alignItems:'center',justifyContent:'center',width:30,height:30,borderRadius:'50%',background:rc+'18',color:rc,fontWeight:800,fontSize:14}},e.pts[ei]),
-                    rawFmt&&h('span',{style:{fontSize:10,color:T4}},'('+rawFmt+')')
+                    iv!==null&&h('span',{style:{fontSize:11,fontWeight:600,color:iv<0?'#DC2626':T3}},fmtDur(iv))
                   )
                 :h('span',{style:{color:T7,fontSize:13}},'—')
             );
           }),
+          hasScores&&h('td',{style:{padding:'12px 10px',textAlign:'center',fontWeight:700,fontSize:13,color:T2,whiteSpace:'nowrap'}},totalSec!==null?fmtDur(totalSec):'—'),
           hasScores&&h('td',{style:{padding:'12px 12px',textAlign:'center',fontWeight:900,fontSize:18,color:e.rank===1?GOLD:e.rank===2?SILVER:e.rank===3?BRONZE:T3}},e.total)
         );
       }))
