@@ -3,18 +3,20 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="theme-color" content="#1b1252"/>
 <title>CF Competition Leaderboard</title>
 <style>
+:root{color-scheme:dark;}
 *{box-sizing:border-box;margin:0;padding:0;}
-body{background:#1b1252;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#171A1F;min-height:100vh;}
+body{background:#1b1252;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#F4F2FF;min-height:100vh;}
 /* Fondo (derivado del arte de la competencia). Capa fija aparte porque
    background-attachment:fixed no anda bien en iOS. */
 body::before{content:'';position:fixed;inset:0;z-index:-1;background:url(fondo.jpg) center top/cover no-repeat;}
 input,button{font-family:inherit;}
 input:focus{outline:none;}
 ::-webkit-scrollbar{width:4px;height:4px;}
-::-webkit-scrollbar-track{background:#F4F5F7;}
-::-webkit-scrollbar-thumb{background:#D3D8DF;border-radius:2px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.28);border-radius:2px;}
 </style>
 </head>
 <body>
@@ -102,13 +104,19 @@ async function dbDeleteTeams() {
 const LEVELS = ['Chill','Picante'];
 // Modalidad de cada equipo (se muestra en la tabla aunque sea una sola por categoría).
 const MODALIDADES = ['HH','MM','HM'];
-const GOLD='#B45309'; const SILVER='#6B7280'; const BRONZE='#9A5B22'; const ACCENT='#DB2777';
+// Colores de acento. Tienen que ser hex de 6 dígitos: en varios lugares se les
+// agrega un sufijo de transparencia (GOLD+'14').
+const GOLD='#F5B13D'; const SILVER='#CBD5E1'; const BRONZE='#E0955A'; const ACCENT='#EC4899';
+const GOLD_BTN='#B45309'; // dorado más oscuro para fondos de botón con texto blanco
 
-// ── Tema (claro) ──────────────────────────────────────────
-const BG='#F4F5F7'; const SURFACE='#FFFFFF'; const SURFACE_ALT='#EEF0F3'; const FIELD_BG='#F8F9FB';
-const BORDER_SOFT='#EDEFF2'; const BORDER='#E3E6EB'; const BORDER_STRONG='#D3D8DF';
-const T1='#171A1F'; const T2='#2E3440'; const T3='#5B6472'; const T4='#7B8494';
-const T5='#9AA2B0'; const T6='#AFB6C2'; const T7='#C2C8D1'; const T8='#D7DBE2';
+// ── Tema (oscuro, sobre el fondo fondo.jpg) ───────────────
+// Las superficies son levemente translúcidas para que se vea el fondo.
+// T1 = texto principal (más claro) ... T8 = el más apagado.
+const BG='#120c35'; const SURFACE='rgba(19,13,56,0.86)'; const SURFACE_ALT='rgba(42,33,96,0.9)'; const FIELD_BG='rgba(8,5,30,0.6)';
+const BORDER_SOFT='rgba(255,255,255,0.07)'; const BORDER='rgba(255,255,255,0.13)'; const BORDER_STRONG='rgba(255,255,255,0.24)';
+const T1='#F4F2FF'; const T2='#E6E3FA'; const T3='#C9C5EC'; const T4='#A9A4D3';
+const T5='#8D88BA'; const T6='#7873A5'; const T7='#625E8F'; const T8='#4E4A78';
+const ON_BG='#CFCBF2'; // texto que queda directo sobre la imagen de fondo
 
 // ── Cronograma ────────────────────────────────────────────
 // SCHEDULE_LOCK_ENABLED=false: el cronograma se ve por el botón de la
@@ -174,7 +182,7 @@ function rankColor(rank) {
   if (rank === 1) return GOLD;
   if (rank === 2) return SILVER;
   if (rank === 3) return BRONZE;
-  return '#5B6472';
+  return '#B4AFD9';
 }
 
 function getRanks(teams, scores, lower) {
@@ -247,6 +255,19 @@ function useAutoSave(changeCount, dirty, run) {
   useEffect(()=>()=>{ if (dirtyRef.current) runRef.current(); }, []);
 }
 
+// true en pantallas angostas (celular): se usa para compactar el encabezado.
+function useIsNarrow() {
+  const q = '(max-width: 600px)';
+  const [narrow, setNarrow] = useState(()=>window.matchMedia(q).matches);
+  useEffect(()=>{
+    const m = window.matchMedia(q);
+    const onChange = ()=>setNarrow(m.matches);
+    m.addEventListener('change', onChange);
+    return ()=>m.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
 // ── Components ────────────────────────────────────────────
 function RankBadge({rank}) {
   const icons={1:'🥇',2:'🥈',3:'🥉'};
@@ -266,7 +287,7 @@ function LoginModal({onLogin,onClose}) {
     onLogin();
   };
   const inp={display:'block',width:'100%',background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T1,padding:'11px 13px',fontSize:14,marginBottom:10};
-  return h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}},
+  return h('div',{style:{position:'fixed',inset:0,background:'rgba(5,3,22,0.72)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300}},
     h('div',{style:{background:SURFACE,border:'1px solid '+BORDER_STRONG,borderRadius:12,padding:28,width:'min(360px,92%)',boxShadow:'0 12px 32px rgba(23,26,31,0.12)'}},
       h('div',{style:{textAlign:'center',marginBottom:20}},
         h('div',{style:{fontSize:40,marginBottom:8}},'🏆'),
@@ -330,7 +351,7 @@ function ConfigPanel({config,onSave}) {
     ),
     h('div',{style:{display:'flex',gap:8,marginBottom:16}},
       h('button',{onClick:addEstacion,style:{flex:1,padding:'9px',background:'none',border:'1px dashed '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:12,fontWeight:700}},'+ Agregar estación'),
-      h('button',{onClick:removeLastEstacion,disabled:events.length<=1,style:{padding:'9px 14px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:events.length<=1?T7:'#B91C1C',cursor:events.length<=1?'default':'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap'}},'🗑 Quitar última')
+      h('button',{onClick:removeLastEstacion,disabled:events.length<=1,style:{padding:'9px 14px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:events.length<=1?T7:'#F87171',cursor:events.length<=1?'default':'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap'}},'🗑 Quitar última')
     ),
     h('div',{style:{display:'flex',alignItems:'center',gap:10,marginTop:4}},
       h('button',{
@@ -338,15 +359,15 @@ function ConfigPanel({config,onSave}) {
         disabled:!dirty||saving,
         style:{
           flex:1, padding:'11px',
-          background:error?'#DC2626':saved?'#1D4ED8':dirty?GOLD:SURFACE_ALT,
-          border:'1px solid '+(error?'#EF4444':saved?'#1D4ED8':dirty?GOLD:BORDER),
+          background:error?'#DC2626':saved?'#1D4ED8':dirty?GOLD_BTN:SURFACE_ALT,
+          border:'1px solid '+(error?'#EF4444':saved?'#1D4ED8':dirty?GOLD_BTN:BORDER),
           borderRadius:8, color:dirty||saved||error?'white':T5,
           cursor:dirty?'pointer':'default',
           fontSize:13, fontWeight:800, letterSpacing:'0.02em',
           transition:'all 0.2s'
         }
       }, saving?'GUARDANDO...':saved?'✓ GUARDADO':error?'✕ ERROR AL GUARDAR — REINTENTAR':dirty?'GUARDAR CONFIGURACIÓN':'SIN CAMBIOS PENDIENTES'),
-      dirty&&!saving&&h('span',{style:{fontSize:10,color:'#EA580C',letterSpacing:'0.06em',flexShrink:0}},'● sin guardar')
+      dirty&&!saving&&h('span',{style:{fontSize:10,color:'#FB923C',letterSpacing:'0.06em',flexShrink:0}},'● sin guardar')
     )
   );
 }
@@ -461,12 +482,12 @@ function TeamsPanel({teams,levels,onSave}) {
           h('div',{style:{display:'flex',alignItems:'center',gap:6,marginTop:6}},
             h('span',{style:{fontSize:9,color:T5,letterSpacing:'0.05em'}},'Categoría:'),
             ...levels.map(lv=>h('button',{key:lv,onClick:()=>toggleLevel(i,lv),style:lvlPillS(t.level===lv)},lv)),
-            !t.level&&h('span',{style:{fontSize:9,color:'#EA580C',fontStyle:'italic'}},'sin asignar')
+            !t.level&&h('span',{style:{fontSize:9,color:'#FB923C',fontStyle:'italic'}},'sin asignar')
           ),
           h('div',{style:{display:'flex',alignItems:'center',gap:6,marginTop:6}},
             h('span',{style:{fontSize:9,color:T5,letterSpacing:'0.05em'}},'Modalidad:'),
             ...MODALIDADES.map(m=>h('button',{key:m,onClick:()=>toggleModalidad(i,m),style:lvlPillS(t.modalidad===m)},m)),
-            !t.modalidad&&h('span',{style:{fontSize:9,color:'#EA580C',fontStyle:'italic'}},'sin definir')
+            !t.modalidad&&h('span',{style:{fontSize:9,color:'#FB923C',fontStyle:'italic'}},'sin definir')
           ),
           h('div',{style:{display:'flex',gap:6,marginTop:6}},
             [0,1,2].map(mi=>h('input',{key:mi,value:(t.members&&t.members[mi])||'',onChange:e=>updateMember(i,mi,e.target.value),
@@ -489,7 +510,7 @@ function TeamsPanel({teams,levels,onSave}) {
           transition:'all 0.2s'
         }
       }, savingLocal?'GUARDANDO...':saved?'✓ GUARDADO':dirty?'💾 GUARDAR EQUIPOS':'SIN CAMBIOS PENDIENTES'),
-      dirty&&!savingLocal&&h('span',{style:{fontSize:10,color:'#EA580C',letterSpacing:'0.06em',flexShrink:0}},'● sin guardar')
+      dirty&&!savingLocal&&h('span',{style:{fontSize:10,color:'#FB923C',letterSpacing:'0.06em',flexShrink:0}},'● sin guardar')
     )
   );
 }
@@ -497,7 +518,7 @@ function TeamsPanel({teams,levels,onSave}) {
 function ScoresPanel({teams,scores,config,onUpdate}) {
   if(!teams.length)return h('div',{style:{padding:24,textAlign:'center',color:T6,fontSize:12}},'No hay equipos asignados a esta categoría todavía — agregalos y asignales la categoría en la pestaña "Equipos"');
   const unitIcon =(u)=>u==='tiempo'?'⏱':u==='kg'?'⚖️':u==='metros'?'📏':'💪';
-  const unitColor=(u)=>u==='tiempo'?'#1D4ED8':u==='kg'?'#C2410C':u==='metros'?'#047857':'#86198F';
+  const unitColor=(u)=>u==='tiempo'?'#60A5FA':u==='kg'?'#FB923C':u==='metros'?'#34D399':'#E879F9';
   const ph       =(u)=>u==='tiempo'?'1:23':u==='kg'?'kg':u==='metros'?'metros':'reps';
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'📊 Carga de Resultados'),
@@ -528,7 +549,7 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
 }
 
 function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove}) {
-  if(!entries.length)return h('div',{style:{textAlign:'center',color:T7,padding:'50px 0',fontSize:12,letterSpacing:'0.12em'}},'— SIN EQUIPOS REGISTRADOS —');
+  if(!entries.length)return h('div',{style:{textAlign:'center',color:ON_BG,padding:'50px 0',fontSize:12,letterSpacing:'0.12em'}},'— SIN EQUIPOS REGISTRADOS —');
   const hasScores=config.events.some((_,ei)=>entries.some(e=>e.pts[ei]!==null));
   const showReorder=canReorder&&!hasScores;
   return h('div',{style:{overflowX:'auto',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10}},
@@ -572,7 +593,7 @@ function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove
               e.pts[ei]!==null
                 ?h('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:3}},
                     h('div',{style:{display:'inline-flex',alignItems:'center',justifyContent:'center',width:30,height:30,borderRadius:'50%',background:rc+'18',color:rc,fontWeight:800,fontSize:14}},e.pts[ei]),
-                    iv!==null&&h('span',{style:{fontSize:11,fontWeight:600,color:iv<0?'#DC2626':T3}},fmtDur(iv))
+                    iv!==null&&h('span',{style:{fontSize:11,fontWeight:600,color:iv<0?'#F87171':T3}},fmtDur(iv))
                   )
                 :h('span',{style:{color:T7,fontSize:13}},'—')
             );
@@ -598,27 +619,27 @@ function ScheduleList({items}) {
 }
 
 function ScheduleLockScreen({items,onAdminClick}) {
-  return h('div',{style:{position:'fixed',inset:0,background:BG,display:'flex',flexDirection:'column',alignItems:'center',padding:'40px 16px',overflowY:'auto',zIndex:100}},
+  return h('div',{style:{position:'fixed',inset:0,background:'url(fondo.jpg) center top/cover no-repeat, '+BG,display:'flex',flexDirection:'column',alignItems:'center',padding:'40px 16px',overflowY:'auto',zIndex:100}},
     h('div',{style:{fontSize:40,marginBottom:10}},'🏆'),
     h('h1',{style:{fontSize:22,fontWeight:900,color:T1,textAlign:'center',letterSpacing:'0.03em',margin:'0 0 4px'}},'PIEDRAS SPRING GAMES'),
     h('p',{style:{fontSize:11,color:T5,textTransform:'uppercase',letterSpacing:'0.12em',marginBottom:24}},'Cronograma de la competencia'),
     h('div',{style:{width:'100%',maxWidth:420}},h(ScheduleList,{items})),
     h('p',{style:{fontSize:10,color:T6,marginTop:24,textAlign:'center',letterSpacing:'0.04em'}},'La tabla de posiciones se habilita automáticamente a partir de las 12:00 hs.'),
-    h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T7,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
+    h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T5,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
   );
 }
 
 function HiddenScreen({onAdminClick}) {
-  return h('div',{style:{position:'fixed',inset:0,background:BG,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'40px 16px',zIndex:100}},
+  return h('div',{style:{position:'fixed',inset:0,background:'url(fondo.jpg) center top/cover no-repeat, '+BG,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'40px 16px',zIndex:100}},
     h('div',{style:{fontSize:40,marginBottom:14}},'🏆'),
     h('h1',{style:{fontSize:19,fontWeight:900,color:T1,textAlign:'center',letterSpacing:'0.02em',margin:'0 0 6px',maxWidth:380}},'Leaderboard oculto por la organización'),
     h('p',{style:{fontSize:12,color:T5,textAlign:'center'}},'Volvé a intentarlo más tarde.'),
-    h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T7,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
+    h('button',{onClick:onAdminClick,style:{marginTop:28,background:'none',border:'none',color:T5,cursor:'pointer',fontSize:10,letterSpacing:'0.08em',textDecoration:'underline'}},'Admin')
   );
 }
 
 function ScheduleModal({items,onClose}) {
-  return h('div',{onClick:onClose,style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16}},
+  return h('div',{onClick:onClose,style:{position:'fixed',inset:0,background:'rgba(5,3,22,0.72)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:300,padding:16}},
     h('div',{onClick:e=>e.stopPropagation(),style:{background:BG,border:'1px solid '+BORDER_STRONG,borderRadius:12,padding:24,width:'min(420px,100%)',maxHeight:'85vh',overflowY:'auto',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
       h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},
         h('h3',{style:{color:T1,fontSize:15,fontWeight:800,margin:0,letterSpacing:'0.02em'}},'📅 Cronograma'),
@@ -643,6 +664,7 @@ function App() {
   const [showLogin,setShowLogin]=useState(false);
   const [showSchedule,setShowSchedule]=useState(false);
   const [siteHidden,setSiteHidden]=useState(false);
+  const narrow=useIsNarrow();
   const [aTab,setATab]=useState('teams');
   const scoreTimer=useRef({});
 
@@ -804,7 +826,8 @@ function App() {
 
   const lb=calcLeaderboard(curTeams,curScores,config);
 
-  const lvlS=(l)=>({padding:'8px 16px',background:selLevel===l?GOLD+'14':'none',border:'1px solid '+(selLevel===l?GOLD:BORDER),borderRadius:6,color:selLevel===l?GOLD:T5,cursor:'pointer',fontSize:12,fontWeight:700,letterSpacing:'0.06em',whiteSpace:'nowrap'});
+  const btnPad=narrow?'6px 10px':'7px 14px';
+  const lvlS=(l)=>({flex:narrow?1:'none',textAlign:'center',padding:narrow?'7px 14px':'8px 16px',background:selLevel===l?GOLD+'14':'none',border:'1px solid '+(selLevel===l?GOLD:BORDER),borderRadius:6,color:selLevel===l?GOLD:T5,cursor:'pointer',fontSize:12,fontWeight:700,letterSpacing:'0.06em',whiteSpace:'nowrap'});
   const atS =(t)=>({padding:'7px 14px',background:aTab===t?ACCENT+'14':'none',border:'1px solid '+(aTab===t?ACCENT:BORDER),borderRadius:6,color:aTab===t?ACCENT:T5,cursor:'pointer',fontSize:11,fontWeight:600,letterSpacing:'0.04em'});
 
   return h('div',{style:{minHeight:'100vh',display:'flex',flexDirection:'column'}},
@@ -813,10 +836,10 @@ function App() {
     showSchedule&&h(ScheduleModal,{items:SCHEDULE_ITEMS,onClose:()=>setShowSchedule(false)}),
 
     // Confirm modal (limpiar resultados)
-    showConfirm&&h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:500}},
-      h('div',{style:{background:SURFACE,border:'1px solid #FCA5A5',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
+    showConfirm&&h('div',{style:{position:'fixed',inset:0,background:'rgba(5,3,22,0.72)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:500}},
+      h('div',{style:{background:SURFACE,border:'1px solid rgba(248,113,113,0.55)',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
         h('div',{style:{fontSize:36,marginBottom:12}},'⚠️'),
-        h('h3',{style:{color:'#B91C1C',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Limpiar todos los resultados'),
+        h('h3',{style:{color:'#F87171',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Limpiar todos los resultados'),
         h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar los resultados de ',h('strong',{style:{color:T1}},'Chill y Picante'),' de forma permanente (los de competencias anteriores no se tocan). Los equipos no se borran.'),
         h('div',{style:{display:'flex',gap:10}},
           h('button',{onClick:()=>setShowConfirm(false),style:{flex:1,padding:'11px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
@@ -828,10 +851,10 @@ function App() {
     ),
 
     // Confirm modal (borrar equipos)
-    showConfirmTeams&&h('div',{style:{position:'fixed',inset:0,background:'rgba(15,23,42,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:500}},
-      h('div',{style:{background:SURFACE,border:'1px solid #FCA5A5',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
+    showConfirmTeams&&h('div',{style:{position:'fixed',inset:0,background:'rgba(5,3,22,0.72)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:500}},
+      h('div',{style:{background:SURFACE,border:'1px solid rgba(248,113,113,0.55)',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
         h('div',{style:{fontSize:36,marginBottom:12}},'⚠️'),
-        h('h3',{style:{color:'#B91C1C',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Borrar todos los equipos'),
+        h('h3',{style:{color:'#F87171',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Borrar todos los equipos'),
         h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar ',h('strong',{style:{color:T1}},'todos los equipos de Chill y Picante'),' de forma permanente, junto con sus resultados (los de competencias anteriores no se tocan). Esta acción no se puede deshacer.'),
         h('div',{style:{display:'flex',gap:10}},
           h('button',{onClick:()=>setShowConfirmTeams(false),style:{flex:1,padding:'11px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
@@ -841,31 +864,31 @@ function App() {
         )
       )
     ),
-    h('div',{style:{background:SURFACE,borderBottom:'1px solid '+BORDER,padding:'14px 16px'}},
-      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}},
-        h('div',null,
-          h('div',{style:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
-            h('div',{style:{fontSize:20,fontWeight:900,color:T1,letterSpacing:'0.05em'}},'🏆 '+(loading?'...':baseConfig.name)),
-            h('button',{onClick:()=>setShowSchedule(true),style:{background:SURFACE_ALT,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T3,cursor:'pointer',fontSize:11,padding:'5px 11px',fontWeight:700,letterSpacing:'0.03em',whiteSpace:'nowrap'}},'📅 Cronograma')
+    h('div',{style:{background:SURFACE,borderBottom:'1px solid '+BORDER,padding:narrow?'8px 12px 10px':'14px 16px'}},
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:narrow?8:14,flexWrap:'wrap',gap:narrow?6:8}},
+        h('div',{style:{flex:'1 1 auto',minWidth:0}},
+          h('div',{style:{display:'flex',alignItems:'center',gap:narrow?8:10}},
+            h('div',{style:{fontSize:narrow?15:20,fontWeight:900,color:T1,letterSpacing:narrow?'0.03em':'0.05em',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',minWidth:0}},'🏆 '+(loading?'...':baseConfig.name)),
+            h('button',{onClick:()=>setShowSchedule(true),title:'Cronograma','aria-label':'Cronograma',style:{background:SURFACE_ALT,border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T3,cursor:'pointer',fontSize:11,padding:narrow?'5px 9px':'5px 11px',fontWeight:700,letterSpacing:'0.03em',whiteSpace:'nowrap',flexShrink:0}},narrow?'📅':'📅 Cronograma')
           ),
           saving&&h('div',{style:{fontSize:9,color:T5,letterSpacing:'0.08em',marginTop:3}},'GUARDANDO...')
         ),
-        h('div',{style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}},
+        h('div',{style:{display:'flex',gap:narrow?6:8,alignItems:'center',flexWrap:'wrap',flex:'0 1 auto',maxWidth:'100%',justifyContent:'flex-end'}},
           isAdmin&&h('button',{
             onClick:toggleHidden,
-            style:{background:siteHidden?'#FFFBEB':SURFACE_ALT,border:'1px solid '+(siteHidden?'#F59E0B':BORDER_STRONG),borderRadius:6,color:siteHidden?'#92400E':T3,cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
+            style:{background:siteHidden?'rgba(245,158,11,0.18)':SURFACE_ALT,border:'1px solid '+(siteHidden?'#F59E0B':BORDER_STRONG),borderRadius:6,color:siteHidden?'#FBBF24':T3,cursor:'pointer',fontSize:11,padding:btnPad,fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
           },siteHidden?'👁 Mostrar':'🙈 Ocultar'),
           isAdmin&&h('button',{
             onClick:()=>setShowConfirmTeams(true),
-            style:{background:'#FEF2F2',border:'1px solid #DC2626',borderRadius:6,color:'#B91C1C',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
+            style:{background:'rgba(220,38,38,0.16)',border:'1px solid rgba(248,113,113,0.6)',borderRadius:6,color:'#F87171',cursor:'pointer',fontSize:11,padding:btnPad,fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
           },'🗑 Borrar equipos'),
           isAdmin&&h('button',{
             onClick:()=>setShowConfirm(true),
-            style:{background:'#FEF2F2',border:'1px solid #DC2626',borderRadius:6,color:'#B91C1C',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
+            style:{background:'rgba(220,38,38,0.16)',border:'1px solid rgba(248,113,113,0.6)',borderRadius:6,color:'#F87171',cursor:'pointer',fontSize:11,padding:btnPad,fontWeight:700,letterSpacing:'0.05em',whiteSpace:'nowrap'}
           },'🗑 Limpiar resultados'),
           isAdmin
-            ?h('button',{onClick:()=>sbClient.auth.signOut(),style:{background:ACCENT,border:'none',borderRadius:6,color:'white',cursor:'pointer',fontSize:11,padding:'7px 14px',fontWeight:800,letterSpacing:'0.07em'}},'● ADMIN')
-            :h('button',{onClick:()=>setShowLogin(true),style:{background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T5,cursor:'pointer',fontSize:11,padding:'7px 14px',letterSpacing:'0.07em'}},'ADMIN')
+            ?h('button',{onClick:()=>sbClient.auth.signOut(),style:{background:ACCENT,border:'none',borderRadius:6,color:'white',cursor:'pointer',fontSize:11,padding:btnPad,fontWeight:800,letterSpacing:'0.07em'}},'● ADMIN')
+            :h('button',{onClick:()=>setShowLogin(true),style:{background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T5,cursor:'pointer',fontSize:11,padding:btnPad,letterSpacing:'0.07em'}},'ADMIN')
         )
       ),
       h('div',{style:{display:'flex',gap:6,overflowX:'auto'}},
@@ -873,21 +896,21 @@ function App() {
       )
     ),
 
-    h('div',{style:{padding:'10px 16px',background:SURFACE_ALT,borderBottom:'1px solid '+BORDER,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:6}},
+    h('div',{style:{padding:narrow?'6px 12px':'10px 16px',background:SURFACE_ALT,borderBottom:'1px solid '+BORDER,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:6}},
       h('div',{style:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
-        h('span',{style:{fontSize:15,fontWeight:800,color:T2,letterSpacing:'0.04em'}},selLevel),
-        h('span',{style:{fontSize:11,color:T6}},curTeams.length+' equipos')
+        !narrow&&h('span',{style:{fontSize:15,fontWeight:800,color:T2,letterSpacing:'0.04em'}},selLevel),
+        h('span',{style:{fontSize:11,color:narrow?T4:T6}},curTeams.length+' equipos')
       ),
       lb.length>0&&h('span',{style:{fontSize:9,color:GOLD,letterSpacing:'0.09em',fontWeight:700}},'CLASIFICACIÓN EN VIVO')
     ),
 
-    h('div',{style:{padding:14,flex:1}},
+    h('div',{style:{padding:narrow?8:14,flex:1}},
       loading
-        ?h('div',{style:{textAlign:'center',padding:50,color:T6,letterSpacing:'0.1em',fontSize:12}},'CONECTANDO A BASE DE DATOS...')
+        ?h('div',{style:{textAlign:'center',padding:50,color:ON_BG,letterSpacing:'0.1em',fontSize:12}},'CONECTANDO A BASE DE DATOS...')
         :h(Leaderboard,{entries:lb,config,teamMembers,teamModalidad,canReorder:isAdmin,onMove:moveTeam})
     ),
 
-    isAdmin&&h('div',{style:{margin:'0 14px 14px',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10,overflow:'hidden'}},
+    isAdmin&&h('div',{style:{margin:narrow?'0 8px 8px':'0 14px 14px',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10,overflow:'hidden'}},
       h('div',{style:{display:'flex',gap:6,padding:'10px 12px',borderBottom:'1px solid '+BORDER_SOFT}},
         h('button',{onClick:()=>setATab('teams'), style:atS('teams') },'👥 Equipos'),
         h('button',{onClick:()=>setATab('scores'),style:atS('scores')},'📊 Resultados'),
@@ -899,8 +922,8 @@ function App() {
     ),
 
     h('div',{style:{padding:'8px 16px',borderTop:'1px solid '+BORDER_SOFT,display:'flex',justifyContent:'space-between',alignItems:'center'}},
-      h('span',{style:{fontSize:9,color:T7,letterSpacing:'0.08em'}},'Menor puntaje = mejor posición · Empates comparten rango'),
-      h('span',{style:{fontSize:9,color:T7}},LEVELS.length+' categorías')
+      h('span',{style:{fontSize:9,color:ON_BG,letterSpacing:'0.08em'}},'Menor puntaje = mejor posición · Empates comparten rango'),
+      h('span',{style:{fontSize:9,color:ON_BG}},LEVELS.length+' categorías')
     )
   );
 }
