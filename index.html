@@ -167,7 +167,7 @@ function fmtDur(sec) {
 
 // Los tiempos cargados son ACUMULADOS (reloj corrido hasta cada estación).
 // El tiempo de cada tramo es estación k − estación k−1 (la 1ª es el valor tal
-// cual). Solo informativo: no entra en el puntaje. null si falta algún dato.
+// cual). null si falta algún dato.
 function calcIntervals(raw) {
   return raw.map((r,k)=>{
     const cur = parseScore(r);
@@ -178,63 +178,40 @@ function calcIntervals(raw) {
   });
 }
 
-function rankColor(rank) {
-  if (rank === 1) return GOLD;
-  if (rank === 2) return SILVER;
-  if (rank === 3) return BRONZE;
-  return '#B4AFD9';
+// Tiempo total de un equipo: el cargado aparte o, si falta (p. ej. datos
+// anteriores), el acumulado de la última estación. null si todavía no terminó.
+function teamTotalSec(scores, config, team) {
+  const own = parseScore(scores && scores.total && scores.total[team]);
+  if (own !== null) return own;
+  const last = String(config.events.length - 1);
+  const evS = (scores && (scores[last] || scores[config.events.length - 1])) || {};
+  return parseScore(evS[team]);
 }
 
-function getRanks(teams, scores, lower) {
-  const sc = scores || {};
-  const withS = teams.filter(t => parseScore(sc[t]) !== null);
-  const without = teams.filter(t => parseScore(sc[t]) === null);
-  const sorted = [...withS].sort((a,b) => {
-    const sa=parseScore(sc[a]), sb=parseScore(sc[b]);
-    return lower ? sa-sb : sb-sa;
-  });
-  const result = {}; let rank = 1;
-  for (let i = 0; i < sorted.length; i++) {
-    result[sorted[i]] = (i>0 && parseScore(sc[sorted[i]])===parseScore(sc[sorted[i-1]]))
-      ? result[sorted[i-1]] : rank;
-    rank++;
-  }
-  without.forEach(t => { result[t] = null; });
-  return {ranks:result, dns:withS.length+1};
-}
-
+// La clasificación es por menor tiempo total (no hay puntos). Empates
+// comparten rango; los equipos que todavía no tienen tiempo total van al
+// final, sin rango.
 function calcLeaderboard(teams, scores, config) {
   if (!teams || !teams.length) return [];
-  const n = config.events.length;
-  const totals = {}; const evPts = {};
-  teams.forEach(t => { totals[t]=0; evPts[t]=Array(n).fill(null); });
-  config.events.forEach((ev, ei) => {
-    const evS = (scores && scores[String(ei)]) || (scores && scores[ei]) || {};
-    const hasData = teams.some(t => parseScore(evS[t]) !== null);
-    if (!hasData) return;
-    const {ranks, dns} = getRanks(teams, evS, ev.lower);
-    teams.forEach(t => {
-      if (ranks[t] !== null) { evPts[t][ei]=ranks[t]; totals[t]+=ranks[t]; }
-      else { evPts[t][ei]=dns; totals[t]+=dns; }
-    });
-  });
-  return [...teams].sort((a,b)=>{
-    // 1. Menor total de puntos gana
-    if(totals[a]!==totals[b]) return totals[a]-totals[b];
-    // 2. Empate: gana quien tuvo más 1eros puestos
-    const ones=(t)=>evPts[t].filter(p=>p===1).length;
-    if(ones(b)!==ones(a)) return ones(b)-ones(a);
-    // 3. Empate: gana quien tuvo más 2dos puestos
-    const twos=(t)=>evPts[t].filter(p=>p===2).length;
-    return twos(b)-twos(a);
-  }).map((team,i)=>({
-    rank:i+1, team, total:totals[team], pts:evPts[team],
-    totalRaw:(scores&&scores.total&&scores.total[team])||null,
-    raw: config.events.map((_,ei)=>{
-      const evS=(scores&&scores[String(ei)])||(scores&&scores[ei])||{};
-      return evS[team]||null;
+  const rows = teams.map(team => ({
+    team,
+    totalSec: teamTotalSec(scores, config, team),
+    raw: config.events.map((_,ei) => {
+      const evS = (scores && (scores[String(ei)] || scores[ei])) || {};
+      return evS[team] || null;
     })
   }));
+  rows.sort((a,b) => {
+    if (a.totalSec === null || b.totalSec === null) return (a.totalSec === null) - (b.totalSec === null);
+    return a.totalSec - b.totalSec;
+  });
+  let prev = null, prevRank = null;
+  rows.forEach((r,i) => {
+    if (r.totalSec === null) { r.rank = null; return; }
+    r.rank = (prev !== null && r.totalSec === prev) ? prevRank : i + 1;
+    prev = r.totalSec; prevRank = r.rank;
+  });
+  return rows;
 }
 
 // Red de seguridad: si hay cambios sin guardar (dirty), los guarda solo
@@ -272,6 +249,7 @@ function useIsNarrow() {
 // ── Components ────────────────────────────────────────────
 function RankBadge({rank}) {
   const icons={1:'🥇',2:'🥈',3:'🥉'};
+  if (rank === null) return h('span',{style:{color:T7,fontSize:13}},'—');
   if (icons[rank]) return h('span',{style:{fontSize:20}},icons[rank]);
   return h('div',{style:{width:26,height:26,borderRadius:'50%',background:SURFACE_ALT,color:T4,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700}},rank);
 }
@@ -533,7 +511,7 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
   const totalS=(scores&&scores.total)||{};
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'📊 Carga de Resultados'),
-    h('p',{style:{fontSize:11,color:T5,marginBottom:14,lineHeight:1.5}},'Cargá el tiempo ACUMULADO en MM:SS (ej. 3:45) al terminar cada estación (la 8 incluida). El "Tiempo total" se carga aparte; si lo dejás vacío, se usa el de la estación 8. La tabla muestra el tiempo de cada tramo (estación − anterior) y rankea automáticamente.'),
+    h('p',{style:{fontSize:11,color:T5,marginBottom:14,lineHeight:1.5}},'Cargá el tiempo ACUMULADO en MM:SS (ej. 3:45) al terminar cada estación (la 8 incluida). El "Tiempo total" se carga aparte; si lo dejás vacío, se usa el de la estación 8. La tabla muestra el tiempo de cada tramo (estación − anterior) y ordena la clasificación por el menor tiempo total.'),
     h('div',{style:{overflowX:'auto'}},
       h('table',{style:{width:'100%',borderCollapse:'collapse'}},
         h('thead',null,h('tr',null,
@@ -566,7 +544,7 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
 
 function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove}) {
   if(!entries.length)return h('div',{style:{textAlign:'center',color:ON_BG,padding:'50px 0',fontSize:12,letterSpacing:'0.12em'}},'— SIN EQUIPOS REGISTRADOS —');
-  const hasScores=config.events.some((_,ei)=>entries.some(e=>e.pts[ei]!==null));
+  const hasScores=entries.some(e=>e.totalSec!==null||e.raw.some(r=>r));
   const showReorder=canReorder&&!hasScores;
   return h('div',{style:{overflowX:'auto',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10}},
     showReorder&&h('div',{style:{padding:'8px 12px',fontSize:10,color:T5,letterSpacing:'0.04em',borderBottom:'1px solid '+BORDER_SOFT}},'📌 Sin resultados cargados todavía — podés reordenar los equipos con las flechas. Apenas se cargue el primer resultado, el orden pasa a ser automático.'),
@@ -578,16 +556,12 @@ function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove
           h('div',null,ev.name),
           ev.sub&&h('div',{style:{marginTop:3,fontSize:11,fontWeight:700,color:T3,letterSpacing:'0.01em',textTransform:'none'}},ev.sub)
         )),
-        hasScores&&h('th',{style:{padding:'9px 10px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'Tiempo total'),
-        hasScores&&h('th',{style:{padding:'9px 12px',textAlign:'center',color:GOLD,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'PUNTOS')
+        hasScores&&h('th',{style:{padding:'9px 10px',textAlign:'center',color:T5,fontSize:10,letterSpacing:'0.07em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'Tiempo total')
       )),
       h('tbody',null,entries.map((e,idx)=>{
         const rowBg=e.rank===1?GOLD+'12':e.rank===2?SILVER+'0C':e.rank===3?BRONZE+'0C':'transparent';
         const members=((teamMembers&&teamMembers[e.team])||[]).filter(m=>m&&m.trim());
         const intervals=calcIntervals(e.raw||[]);
-        // Tiempo total cargado aparte; si falta (p. ej. datos anteriores), vale el acumulado de la última estación
-        const totalOwn=parseScore(e.totalRaw);
-        const totalSec=totalOwn!==null?totalOwn:(e.raw?parseScore(e.raw[e.raw.length-1]):null);
         return h('tr',{key:e.team,style:{background:rowBg,borderBottom:'1px solid '+BORDER_SOFT}},
           h('td',{style:{padding:'12px 6px',textAlign:'center'}},
             showReorder
@@ -605,19 +579,14 @@ function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove
             members.length>0&&h('div',{style:{fontSize:10,color:T5,marginTop:2}},members.join(' · '))
           ),
           ...config.events.map((ev,ei)=>{
-            const rc=rankColor(e.rank);
             const iv=intervals[ei];
             return h('td',{key:ei,style:{padding:'12px 8px',textAlign:'center'}},
-              e.pts[ei]!==null
-                ?h('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:3}},
-                    h('div',{style:{display:'inline-flex',alignItems:'center',justifyContent:'center',width:30,height:30,borderRadius:'50%',background:rc+'18',color:rc,fontWeight:800,fontSize:14}},e.pts[ei]),
-                    iv!==null&&h('span',{style:{fontSize:11,fontWeight:600,color:iv<0?'#F87171':T3}},fmtDur(iv))
-                  )
+              iv!==null
+                ?h('span',{style:{fontSize:13,fontWeight:600,color:iv<0?'#F87171':T2}},fmtDur(iv))
                 :h('span',{style:{color:T7,fontSize:13}},'—')
             );
           }),
-          hasScores&&h('td',{style:{padding:'12px 10px',textAlign:'center',fontWeight:700,fontSize:13,color:T2,whiteSpace:'nowrap'}},totalSec!==null?fmtDur(totalSec):'—'),
-          hasScores&&h('td',{style:{padding:'12px 12px',textAlign:'center',fontWeight:900,fontSize:18,color:e.rank===1?GOLD:e.rank===2?SILVER:e.rank===3?BRONZE:T3}},e.total)
+          hasScores&&h('td',{style:{padding:'12px 12px',textAlign:'center',fontWeight:900,fontSize:16,color:e.rank===1?GOLD:e.rank===2?SILVER:e.rank===3?BRONZE:T2,whiteSpace:'nowrap'}},e.totalSec!==null?fmtDur(e.totalSec):'—')
         );
       }))
     )
@@ -760,7 +729,7 @@ function App() {
   };
 
   // moveTeam: reordena el orden de exhibición (solo tiene efecto visible
-  // mientras no haya resultados cargados; apenas hay puntajes, el orden
+  // mientras no haya resultados cargados; apenas hay tiempos cargados, el orden
   // real pasa a decidirlo calcLeaderboard).
   const moveTeam=(name,dir)=>{
     const idx=curTeams.indexOf(name);
@@ -956,7 +925,7 @@ function App() {
     ),
 
     h('div',{style:{padding:'8px 16px',borderTop:'1px solid '+BORDER_SOFT,display:'flex',justifyContent:'space-between',alignItems:'center'}},
-      h('span',{style:{fontSize:9,color:ON_BG,letterSpacing:'0.08em'}},'Menor puntaje = mejor posición · Empates comparten rango'),
+      h('span',{style:{fontSize:9,color:ON_BG,letterSpacing:'0.08em'}},'Gana el menor tiempo total · Empates comparten rango'),
       h('span',{style:{fontSize:9,color:ON_BG}},LEVELS.length+' categorías')
     )
   );
