@@ -229,6 +229,7 @@ function calcLeaderboard(teams, scores, config) {
     return twos(b)-twos(a);
   }).map((team,i)=>({
     rank:i+1, team, total:totals[team], pts:evPts[team],
+    totalRaw:(scores&&scores.total&&scores.total[team])||null,
     raw: config.events.map((_,ei)=>{
       const evS=(scores&&scores[String(ei)])||(scores&&scores[ei])||{};
       return evS[team]||null;
@@ -529,17 +530,19 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
   const unitIcon =(u)=>u==='tiempo'?'⏱':u==='kg'?'⚖️':u==='metros'?'📏':'💪';
   const unitColor=(u)=>u==='tiempo'?'#60A5FA':u==='kg'?'#FB923C':u==='metros'?'#34D399':'#E879F9';
   const ph       =(u)=>u==='tiempo'?'1:23':u==='kg'?'kg':u==='metros'?'metros':'reps';
+  const totalS=(scores&&scores.total)||{};
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'📊 Carga de Resultados'),
-    h('p',{style:{fontSize:11,color:T5,marginBottom:14,lineHeight:1.5}},'Cargá el tiempo ACUMULADO en MM:SS (ej. 3:45) al terminar cada estación; en la última, el tiempo total. La tabla muestra el tiempo de cada tramo (estación − anterior) y rankea automáticamente.'),
+    h('p',{style:{fontSize:11,color:T5,marginBottom:14,lineHeight:1.5}},'Cargá el tiempo ACUMULADO en MM:SS (ej. 3:45) al terminar cada estación (la 8 incluida). El "Tiempo total" se carga aparte; si lo dejás vacío, se usa el de la estación 8. La tabla muestra el tiempo de cada tramo (estación − anterior) y rankea automáticamente.'),
     h('div',{style:{overflowX:'auto'}},
       h('table',{style:{width:'100%',borderCollapse:'collapse'}},
         h('thead',null,h('tr',null,
           h('th',{style:{textAlign:'left',padding:'8px 10px',color:T5,fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER}},'Equipo'),
           ...config.events.map((ev,ei)=>h('th',{key:ei,style:{padding:'8px 10px',textAlign:'center',color:unitColor(ev.unit),fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},
-            h('div',null,ev.name+' '+unitIcon(ev.unit)+(ei===config.events.length-1?' · TOTAL':'')),
+            h('div',null,ev.name+' '+unitIcon(ev.unit)),
             ev.sub&&h('div',{style:{marginTop:2,fontSize:10,fontWeight:700,color:T4,textTransform:'none',letterSpacing:'0.01em'}},ev.sub)
-          ))
+          )),
+          h('th',{style:{padding:'8px 10px',textAlign:'center',color:GOLD,fontSize:10,letterSpacing:'0.08em',textTransform:'uppercase',borderBottom:'1px solid '+BORDER,whiteSpace:'nowrap'}},'Tiempo total ⏱')
         )),
         h('tbody',null,teams.map(team=>h('tr',{key:team,style:{borderBottom:'1px solid '+BORDER_SOFT}},
           h('td',{style:{padding:'8px 10px',color:T2,fontWeight:600,fontSize:13,whiteSpace:'nowrap'}},team),
@@ -550,7 +553,11 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
               h('input',{value:v,onChange:e=>onUpdate(ei,team,e.target.value),placeholder:ph(ev.unit),
                 style:{width:85,background:FIELD_BG,border:'1px solid '+BORDER_STRONG,borderRadius:5,color:T1,padding:'7px 8px',fontSize:13,textAlign:'center'}})
             );
-          })
+          }),
+          h('td',{key:'total',style:{padding:'5px 6px',textAlign:'center'}},
+            h('input',{value:(totalS&&totalS[team])||'',onChange:e=>onUpdate('total',team,e.target.value),placeholder:'25:40',
+              style:{width:85,background:FIELD_BG,border:'1px solid '+GOLD+'55',borderRadius:5,color:T1,padding:'7px 8px',fontSize:13,textAlign:'center'}})
+          )
         )))
       )
     )
@@ -578,7 +585,9 @@ function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove
         const rowBg=e.rank===1?GOLD+'12':e.rank===2?SILVER+'0C':e.rank===3?BRONZE+'0C':'transparent';
         const members=((teamMembers&&teamMembers[e.team])||[]).filter(m=>m&&m.trim());
         const intervals=calcIntervals(e.raw||[]);
-        const totalSec=e.raw?parseScore(e.raw[e.raw.length-1]):null; // la última estación se carga con el tiempo total
+        // Tiempo total cargado aparte; si falta (p. ej. datos anteriores), vale el acumulado de la última estación
+        const totalOwn=parseScore(e.totalRaw);
+        const totalSec=totalOwn!==null?totalOwn:(e.raw?parseScore(e.raw[e.raw.length-1]):null);
         return h('tr',{key:e.team,style:{background:rowBg,borderBottom:'1px solid '+BORDER_SOFT}},
           h('td',{style:{padding:'12px 6px',textAlign:'center'}},
             showReorder
