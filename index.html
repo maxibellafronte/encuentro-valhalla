@@ -97,6 +97,8 @@ async function dbDeleteTeams() {
 // ── Constantes ────────────────────────────────────────────
 // Categorías de la competencia actual (una sola tabla por categoría).
 const LEVELS = ['Chill','Picante'];
+// Modalidad de cada equipo (se muestra en la tabla aunque sea una sola por categoría).
+const MODALIDADES = ['HH','MM','HM'];
 const GOLD='#B45309'; const SILVER='#6B7280'; const BRONZE='#9A5B22'; const ACCENT='#DB2777';
 
 // ── Tema (claro) ──────────────────────────────────────────
@@ -331,6 +333,7 @@ function TeamsPanel({teams,levels,onSave}) {
   const emptyMembers=()=>['','',''];
   const [list,setList]=useState(teams.map(t=>({...t,members:t.members&&t.members.length===3?[...t.members]:emptyMembers()})));
   const [val,setVal]=useState('');
+  const [newMod,setNewMod]=useState(null);
   const [editIdx,setEditIdx]=useState(null);
   const [editVal,setEditVal]=useState('');
   const [dirty,setDirty]=useState(false);
@@ -341,12 +344,17 @@ function TeamsPanel({teams,levels,onSave}) {
   const [editError,setEditError]=useState('');
   const markChanged=()=>{ setDirty(true); setChangeCount(c=>c+1); };
 
+  // La modalidad elegida queda marcada después de agregar, para cargar varios
+  // equipos seguidos de la misma modalidad sin volver a elegirla.
   const add=()=>{
     const t=val.trim();
     if(!t){ setAddError('Escribí un nombre'); return; }
     if(list.some(x=>x.name.toLowerCase()===t.toLowerCase())){ setAddError('Ya existe un equipo con ese nombre'); return; }
     setAddError('');
-    const u=[...list,{name:t,level:null,members:emptyMembers()}]; setList(u); setVal(''); markChanged();
+    const u=[...list,{name:t,level:null,modalidad:newMod,members:emptyMembers()}]; setList(u); setVal(''); markChanged();
+  };
+  const toggleModalidad=(i,m)=>{
+    const u=list.map((x,j)=>j===i?{...x,modalidad:x.modalidad===m?null:m}:x); setList(u); markChanged();
   };
   const del=(name)=>{ const u=list.filter(x=>x.name!==name); setList(u); markChanged(); };
   const startEdit=(i)=>{ setEditIdx(i); setEditVal(list[i].name); setEditError(''); };
@@ -392,9 +400,13 @@ function TeamsPanel({teams,levels,onSave}) {
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'👥 Equipos'),
     h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Podés cargar el equipo sin definir la categoría y asignarla después con los botones de abajo.'+(unassigned?' · '+unassigned+' sin asignar':'')),
-    h('div',{style:{display:'flex',gap:8,marginBottom:addError?6:14}},
+    h('div',{style:{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:addError?6:14}},
       h('input',{value:val,onChange:e=>{setVal(e.target.value);setAddError('');},onKeyDown:e=>e.key==='Enter'&&add(),placeholder:'Nombre del equipo...',
-        style:{flex:1,background:FIELD_BG,border:'1px solid '+(addError?ACCENT:BORDER_STRONG),borderRadius:8,color:T1,padding:'10px 12px',fontSize:13}}),
+        style:{flex:'1 1 180px',maxWidth:300,minWidth:0,background:FIELD_BG,border:'1px solid '+(addError?ACCENT:BORDER_STRONG),borderRadius:8,color:T1,padding:'10px 12px',fontSize:13}}),
+      h('div',{style:{display:'flex',alignItems:'center',gap:6}},
+        h('span',{style:{fontSize:10,color:T5,letterSpacing:'0.05em',textTransform:'uppercase',fontWeight:700}},'Modalidad'),
+        MODALIDADES.map(m=>h('button',{key:m,onClick:()=>setNewMod(newMod===m?null:m),style:{...lvlPillS(newMod===m),padding:'9px 13px',borderRadius:8,fontSize:12}},m))
+      ),
       h('button',{onClick:add,style:{padding:'10px 16px',background:ACCENT,border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},'+ Añadir')
     ),
     addError&&h('p',{style:{color:ACCENT,fontSize:11,margin:'0 0 14px'}},addError),
@@ -428,6 +440,11 @@ function TeamsPanel({teams,levels,onSave}) {
             h('span',{style:{fontSize:9,color:T5,letterSpacing:'0.05em'}},'Categoría:'),
             ...levels.map(lv=>h('button',{key:lv,onClick:()=>toggleLevel(i,lv),style:lvlPillS(t.level===lv)},lv)),
             !t.level&&h('span',{style:{fontSize:9,color:'#EA580C',fontStyle:'italic'}},'sin asignar')
+          ),
+          h('div',{style:{display:'flex',alignItems:'center',gap:6,marginTop:6}},
+            h('span',{style:{fontSize:9,color:T5,letterSpacing:'0.05em'}},'Modalidad:'),
+            ...MODALIDADES.map(m=>h('button',{key:m,onClick:()=>toggleModalidad(i,m),style:lvlPillS(t.modalidad===m)},m)),
+            !t.modalidad&&h('span',{style:{fontSize:9,color:'#EA580C',fontStyle:'italic'}},'sin definir')
           ),
           h('div',{style:{display:'flex',gap:6,marginTop:6}},
             [0,1,2].map(mi=>h('input',{key:mi,value:(t.members&&t.members[mi])||'',onChange:e=>updateMember(i,mi,e.target.value),
@@ -485,7 +502,7 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
   );
 }
 
-function Leaderboard({entries,config,teamMembers,canReorder,onMove}) {
+function Leaderboard({entries,config,teamMembers,teamModalidad,canReorder,onMove}) {
   if(!entries.length)return h('div',{style:{textAlign:'center',color:T7,padding:'50px 0',fontSize:12,letterSpacing:'0.12em'}},'— SIN EQUIPOS REGISTRADOS —');
   const hasScores=config.events.some((_,ei)=>entries.some(e=>e.pts[ei]!==null));
   const showReorder=canReorder&&!hasScores;
@@ -511,7 +528,10 @@ function Leaderboard({entries,config,teamMembers,canReorder,onMove}) {
               :h(RankBadge,{rank:e.rank})
           ),
           h('td',{style:{padding:'12px 12px'}},
-            h('div',{style:{fontWeight:600,color:T2,fontSize:14}},e.team),
+            h('div',{style:{display:'flex',alignItems:'center',gap:7}},
+              h('span',{style:{fontWeight:600,color:T2,fontSize:14}},e.team),
+              teamModalidad&&teamModalidad[e.team]&&h('span',{style:{fontSize:9,fontWeight:800,color:T3,background:SURFACE_ALT,border:'1px solid '+BORDER_STRONG,borderRadius:4,padding:'1px 6px',letterSpacing:'0.05em',flexShrink:0}},teamModalidad[e.team])
+            ),
             members.length>0&&h('div',{style:{fontSize:10,color:T5,marginTop:2}},members.join(' · '))
           ),
           ...config.events.map((ev,ei)=>{
@@ -605,7 +625,8 @@ function App() {
   const publicHidden = sessionChecked && !isAdmin && siteHidden;
 
   const curTeams=teams.filter(t=>t.level===selLevel).map(t=>t.name); // solo los ya asignados a la categoría actual (los sin asignar no entran a ninguna tabla)
-  const teamMembers={}; teams.forEach(t=>{ teamMembers[t.name]=t.members||[]; }); // nombre -> integrantes
+  const teamMembers={}; const teamModalidad={};
+  teams.forEach(t=>{ teamMembers[t.name]=t.members||[]; teamModalidad[t.name]=t.modalidad||null; }); // nombre -> integrantes / modalidad
   const curScores=scores[selLevel]||{};
   const config=baseConfig;
 
@@ -831,7 +852,7 @@ function App() {
     h('div',{style:{padding:14,flex:1}},
       loading
         ?h('div',{style:{textAlign:'center',padding:50,color:T6,letterSpacing:'0.1em',fontSize:12}},'CONECTANDO A BASE DE DATOS...')
-        :h(Leaderboard,{entries:lb,config,teamMembers,canReorder:isAdmin,onMove:moveTeam})
+        :h(Leaderboard,{entries:lb,config,teamMembers,teamModalidad,canReorder:isAdmin,onMove:moveTeam})
     ),
 
     isAdmin&&h('div',{style:{margin:'0 14px 14px',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10,overflow:'hidden'}},
