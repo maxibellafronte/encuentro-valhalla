@@ -399,6 +399,9 @@ function TeamsPanel({teams,levels,onSave}) {
   const toggleModalidad=(i,m)=>{
     const u=list.map((x,j)=>j===i?{...x,modalidad:x.modalidad===m?null:m}:x); setList(u); markChanged();
   };
+  const toggleOculto=(i)=>{
+    const u=list.map((x,j)=>j===i?{...x,oculto:!x.oculto}:x); setList(u); markChanged();
+  };
   const del=(name)=>{ const u=list.filter(x=>x.name!==name); setList(u); markChanged(); };
   const startEdit=(i)=>{ setEditIdx(i); setEditVal(list[i].name); setEditError(''); };
   const confirmEdit=(i)=>{
@@ -488,6 +491,12 @@ function TeamsPanel({teams,levels,onSave}) {
             h('span',{style:{fontSize:9,color:T5,letterSpacing:'0.05em'}},'Modalidad:'),
             ...MODALIDADES.map(m=>h('button',{key:m,onClick:()=>toggleModalidad(i,m),style:lvlPillS(t.modalidad===m)},m)),
             !t.modalidad&&h('span',{style:{fontSize:9,color:'#FB923C',fontStyle:'italic'}},'sin definir')
+          ),
+          h('div',{style:{display:'flex',alignItems:'center',gap:6,marginTop:6}},
+            h('span',{style:{fontSize:9,color:T5,letterSpacing:'0.05em'}},'En la tabla:'),
+            h('button',{onClick:()=>t.oculto&&toggleOculto(i),style:lvlPillS(!t.oculto)},'👁 Mostrar'),
+            h('button',{onClick:()=>!t.oculto&&toggleOculto(i),style:{...lvlPillS(!!t.oculto),color:t.oculto?'#FB923C':T5,borderColor:t.oculto?'#FB923C':BORDER_STRONG,background:t.oculto?'rgba(251,146,60,0.14)':'none'}},'🚫 Ocultar'),
+            t.oculto&&h('span',{style:{fontSize:9,color:'#FB923C',fontStyle:'italic'}},'no aparece en la tabla')
           ),
           h('div',{style:{display:'flex',gap:6,marginTop:6}},
             [0,1,2].map(mi=>h('input',{key:mi,value:(t.members&&t.members[mi])||'',onChange:e=>updateMember(i,mi,e.target.value),
@@ -678,7 +687,14 @@ function App() {
   const scheduleLocked = SCHEDULE_LOCK_ENABLED && sessionChecked && !isAdmin && now < SCHEDULE_LOCK_UNTIL.getTime();
   const publicHidden = sessionChecked && !isAdmin && siteHidden;
 
-  const curTeams=teams.filter(t=>t.level===selLevel).map(t=>t.name); // solo los ya asignados a la categoría actual (los sin asignar no entran a ninguna tabla)
+  const [selMod,setSelMod]=useState(null); // filtro de modalidad (null = todas)
+  // Solo los ya asignados a la categoría actual (los sin asignar no entran a ninguna
+  // tabla) y que no estén marcados como ocultos (anotados que no se presentan).
+  const curTeams=teams.filter(t=>t.level===selLevel&&!t.oculto).map(t=>t.name);
+  const modCounts={}; MODALIDADES.forEach(m=>{ modCounts[m]=teams.filter(t=>t.level===selLevel&&!t.oculto&&t.modalidad===m).length; });
+  const showModFilter=MODALIDADES.some(m=>modCounts[m]>0);
+  const filterMod=showModFilter?selMod:null;
+  const lbTeams=filterMod?teams.filter(t=>t.level===selLevel&&!t.oculto&&t.modalidad===filterMod).map(t=>t.name):curTeams;
   const teamMembers={}; const teamModalidad={};
   teams.forEach(t=>{ teamMembers[t.name]=t.members||[]; teamModalidad[t.name]=t.modalidad||null; }); // nombre -> integrantes / modalidad
   const curScores=scores[selLevel]||{};
@@ -824,10 +840,12 @@ function App() {
     h(HiddenScreen,{onAdminClick:()=>setShowLogin(true)})
   );
 
-  const lb=calcLeaderboard(curTeams,curScores,config);
+  // Con filtro de modalidad el ranking se recalcula solo entre esos equipos.
+  const lb=calcLeaderboard(lbTeams,curScores,config);
 
   const btnPad=narrow?'6px 10px':'7px 14px';
   const lvlS=(l)=>({flex:narrow?1:'none',textAlign:'center',padding:narrow?'7px 14px':'8px 16px',background:selLevel===l?GOLD+'14':'none',border:'1px solid '+(selLevel===l?GOLD:BORDER),borderRadius:6,color:selLevel===l?GOLD:T5,cursor:'pointer',fontSize:12,fontWeight:700,letterSpacing:'0.06em',whiteSpace:'nowrap'});
+  const modS=(active)=>({padding:narrow?'6px 12px':'6px 14px',background:active?GOLD+'22':SURFACE,border:'1px solid '+(active?GOLD:BORDER_STRONG),borderRadius:6,color:active?GOLD:ON_BG,cursor:'pointer',fontSize:12,fontWeight:700,letterSpacing:'0.04em',whiteSpace:'nowrap',flexShrink:0});
   const atS =(t)=>({padding:'7px 14px',background:aTab===t?ACCENT+'14':'none',border:'1px solid '+(aTab===t?ACCENT:BORDER),borderRadius:6,color:aTab===t?ACCENT:T5,cursor:'pointer',fontSize:11,fontWeight:600,letterSpacing:'0.04em'});
 
   return h('div',{style:{minHeight:'100vh',display:'flex',flexDirection:'column'}},
@@ -907,7 +925,14 @@ function App() {
     h('div',{style:{padding:narrow?8:14,flex:1}},
       loading
         ?h('div',{style:{textAlign:'center',padding:50,color:ON_BG,letterSpacing:'0.1em',fontSize:12}},'CONECTANDO A BASE DE DATOS...')
-        :h(Leaderboard,{entries:lb,config,teamMembers,teamModalidad,canReorder:isAdmin,onMove:moveTeam})
+        :h(React.Fragment,null,
+            showModFilter&&h('div',{style:{display:'flex',gap:6,alignItems:'center',marginBottom:narrow?8:10,overflowX:'auto'}},
+              h('span',{style:{fontSize:10,color:ON_BG,letterSpacing:'0.06em',textTransform:'uppercase',fontWeight:700,flexShrink:0}},'Ver'),
+              [null,...MODALIDADES].map(m=>h('button',{key:m||'todos',onClick:()=>setSelMod(m),style:modS(filterMod===m)},
+                m?m+' · '+modCounts[m]:'Todos · '+curTeams.length))
+            ),
+            h(Leaderboard,{entries:lb,config,teamMembers,teamModalidad,canReorder:isAdmin&&!filterMod,onMove:moveTeam})
+          )
     ),
 
     isAdmin&&h('div',{style:{margin:narrow?'0 8px 8px':'0 14px 14px',background:SURFACE,border:'1px solid '+BORDER,borderRadius:10,overflow:'hidden'}},
