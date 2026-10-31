@@ -71,33 +71,32 @@ async function dbDeleteByKey(key, token) {
   if (!r.ok) { const t = await r.text(); throw new Error('Delete error '+r.status+': '+t); }
 }
 
-// Borra solo los scores de las categorías VISIBLES hoy (LEVELS x GENDERS),
-// nunca las ocultas (Beginner/Scaled/Advanced/RX, HH/MM) — esas se conservan
-// pase lo que pase acá. Conserva equipos y config.
+// Claves en la base. Las de competencias anteriores (teams:HHM, teams:MMH,
+// scores:<categoría> <género>, config) quedan intactas, solo se dejan de leer.
+const TEAMS_KEY = 'teams:all';
+const CONFIG_KEY = 'config:est';
+const scoresKey = (level) => 'scores:'+level;
+
+// Borra solo los resultados de las categorías VISIBLES hoy (LEVELS), nunca
+// los de competencias anteriores. Conserva equipos y config.
 async function dbDeleteScores() {
   try {
     const token = await getAuthToken();
-    const keys = LEVELS.flatMap(l=>GENDERS.map(g=>'scores:'+l+' '+g));
-    await Promise.all(keys.map(k=>dbDeleteByKey(k, token)));
+    await Promise.all(LEVELS.map(l=>dbDeleteByKey(scoresKey(l), token)));
   } catch(e) { console.error('dbDeleteScores error',e); throw e; }
 }
 
-// Borra solo los equipos de los géneros VISIBLES hoy (GENDERS), nunca las
-// categorías ocultas. Conserva config.
+// Borra solo los equipos de la competencia actual. Conserva config.
 async function dbDeleteTeams() {
   try {
     const token = await getAuthToken();
-    await Promise.all(GENDERS.map(g=>dbDeleteByKey('teams:'+g, token)));
+    await dbDeleteByKey(TEAMS_KEY, token);
   } catch(e) { console.error('dbDeleteTeams error',e); throw e; }
 }
 
 // ── Constantes ────────────────────────────────────────────
-// Categorías de la próxima competencia. Las de antes (Beginner/Scaled/Advanced/RX
-// y HH/MM) quedan ocultas pero sus datos siguen intactos en Supabase — para
-// volver a usarlas alcanza con restaurar estas dos constantes.
-const LEVELS = ['Participativa','Competitiva'];
-const GENDERS = ['HHM','MMH'];
-const GENDER_LABELS = {HHM:'2 Hombres + 1 Mujer',MMH:'2 Mujeres + 1 Hombre'};
+// Categorías de la competencia actual (una sola tabla por categoría).
+const LEVELS = ['Chill','Picante'];
 const GOLD='#B45309'; const SILVER='#6B7280'; const BRONZE='#9A5B22'; const ACCENT='#DB2777';
 
 // ── Tema (claro) ──────────────────────────────────────────
@@ -116,26 +115,26 @@ const SCHEDULE_ITEMS = [
   {time:'10:00', activity:'Apertura del predio'},
   {time:'10:30', activity:'Check In'},
   {time:'11:15', activity:'Briefing y EEC'},
-  {time:'12:00 - 13:20', activity:'Categoría Participativa'},
+  {time:'12:00 - 13:20', activity:'Categoría Chill'},
   {time:'', activity:'BREAK'},
-  {time:'14:00 - 15:20', activity:'Categoría Competitiva'},
+  {time:'14:00 - 15:20', activity:'Categoría Picante'},
   {time:'16:00', activity:'Premiación'},
 ];
 
-// Config base: WODs de arranque para un deploy nuevo, cada uno con su
-// propia unidad (se elige a mano en el panel de admin — reps / metros /
-// tiempo). La cantidad de WODs se controla desde el panel de Config
-// (agregar / quitar el último), no es un número fijo.
+// Config base: 8 estaciones, todas con tiempo en formato mm:ss (menor
+// tiempo = mejor). La cantidad se controla desde el panel de Config
+// (agregar / quitar la última), no es un número fijo.
 const BASE_CONFIG = {
   name: 'CROSSFIT COMPETITION',
-  events: Array.from({length:11}, (_,i)=>({name:'WOD '+(i+1), unit:'tiempo', lower:true}))
+  events: Array.from({length:8}, (_,i)=>({name:'Estación '+(i+1), unit:'tiempo', lower:true}))
 };
 
 // ── Utilidades ────────────────────────────────────────────
 function parseScore(s) {
   if (!s || String(s).trim() === '') return null;
   s = String(s).trim();
-  const m = s.match(/^(\d+):(\d{2})$/);
+  // mm:ss — también acepta "3.02" o "3,02" (error de tipeo muy común) como 3:02
+  const m = s.match(/^(\d+)[:.,](\d{2})$/);
   if (m) return parseInt(m[1])*60 + parseInt(m[2]);
   const n = parseFloat(s);
   return isNaN(n) ? null : n;
@@ -265,12 +264,6 @@ function LoginModal({onLogin,onClose}) {
   );
 }
 
-const WOD_UNITS=[
-  {key:'reps',   icon:'💪', label:'REPS',   bg:'#FDF4FF', border:'#A21CAF', color:'#86198F'},
-  {key:'metros', icon:'📏', label:'METROS', bg:'#ECFDF5', border:'#059669', color:'#047857'},
-  {key:'tiempo', icon:'⏱', label:'TIEMPO', bg:'#EFF6FF', border:'#1D4ED8', color:'#1D4ED8'},
-];
-
 function ConfigPanel({config,onSave}) {
   const [name,setName]=useState(config.name);
   const [events,setEvents]=useState(config.events.map(e=>({...e})));
@@ -280,14 +273,10 @@ function ConfigPanel({config,onSave}) {
   const [saved,setSaved]=useState(false);
   const [error,setError]=useState(false);
   const markChanged=()=>{ setDirty(true); setChangeCount(c=>c+1); };
-  const setUnit=(i,unit)=>{
-    setEvents(prev=>prev.map((e,j)=>j===i?{...e,unit,lower:unit==='tiempo'}:e));
-    markChanged();
-  };
   const changeName=v=>{ setName(v); markChanged(); };
   const changeEventName=(i,v)=>{ setEvents(prev=>prev.map((x,j)=>j===i?{...x,name:v}:x)); markChanged(); };
-  const addWod=()=>{ setEvents(prev=>[...prev,{name:'WOD '+(prev.length+1), unit:'tiempo', lower:true}]); markChanged(); };
-  const removeLastWod=()=>{ if(events.length<=1) return; setEvents(prev=>prev.slice(0,-1)); markChanged(); };
+  const addEstacion=()=>{ setEvents(prev=>[...prev,{name:'Estación '+(prev.length+1), unit:'tiempo', lower:true}]); markChanged(); };
+  const removeLastEstacion=()=>{ if(events.length<=1) return; setEvents(prev=>prev.slice(0,-1)); markChanged(); };
   const handleSave=async()=>{
     setSaving(true); setError(false);
     try{
@@ -308,21 +297,16 @@ function ConfigPanel({config,onSave}) {
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:14}},'⚙ Configuración General'),
     h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:5}},'Nombre de la competencia'),
     h('input',{value:name,onChange:e=>changeName(e.target.value),style:{...inp,fontSize:16,fontWeight:700,marginBottom:14}}),
-    h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:8}},'WODs ('+events.length+')'),
-    ...events.map((ev,i)=>{
-      const active=ev.unit||'tiempo';
-      return h('div',{key:i,style:{background:SURFACE_ALT,border:'1px solid '+BORDER,borderRadius:8,padding:'10px 12px',marginBottom:8}},
-        h('input',{value:ev.name,onChange:e=>changeEventName(i,e.target.value),placeholder:'WOD '+(i+1),style:{...inp,marginBottom:8}}),
-        h('div',{style:{display:'flex',gap:6}},
-          WOD_UNITS.map(u=>h('button',{key:u.key,onClick:()=>setUnit(i,u.key),
-            style:{flex:1,padding:'7px 6px',background:active===u.key?u.bg:'none',border:'1px solid '+(active===u.key?u.border:BORDER_STRONG),borderRadius:6,color:active===u.key?u.color:T5,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'}
-          }, u.icon+' '+u.label))
-        )
-      );
-    }),
+    h('span',{style:{fontSize:10,color:T5,textTransform:'uppercase',letterSpacing:'0.08em',display:'block',marginBottom:4}},'Estaciones ('+events.length+')'),
+    h('p',{style:{fontSize:11,color:T5,marginBottom:10}},'⏱ Todas las estaciones se cargan en tiempo (mm:ss) — gana el menor tiempo.'),
+    ...events.map((ev,i)=>
+      h('div',{key:i,style:{background:SURFACE_ALT,border:'1px solid '+BORDER,borderRadius:8,padding:'10px 12px',marginBottom:8}},
+        h('input',{value:ev.name,onChange:e=>changeEventName(i,e.target.value),placeholder:'Estación '+(i+1),style:inp})
+      )
+    ),
     h('div',{style:{display:'flex',gap:8,marginBottom:16}},
-      h('button',{onClick:addWod,style:{flex:1,padding:'9px',background:'none',border:'1px dashed '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:12,fontWeight:700}},'+ Agregar WOD'),
-      h('button',{onClick:removeLastWod,disabled:events.length<=1,style:{padding:'9px 14px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:events.length<=1?T7:'#B91C1C',cursor:events.length<=1?'default':'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap'}},'🗑 Quitar último')
+      h('button',{onClick:addEstacion,style:{flex:1,padding:'9px',background:'none',border:'1px dashed '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:12,fontWeight:700}},'+ Agregar estación'),
+      h('button',{onClick:removeLastEstacion,disabled:events.length<=1,style:{padding:'9px 14px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:events.length<=1?T7:'#B91C1C',cursor:events.length<=1?'default':'pointer',fontSize:12,fontWeight:700,whiteSpace:'nowrap'}},'🗑 Quitar última')
     ),
     h('div',{style:{display:'flex',alignItems:'center',gap:10,marginTop:4}},
       h('button',{
@@ -343,7 +327,7 @@ function ConfigPanel({config,onSave}) {
   );
 }
 
-function TeamsPanel({teams,levels,genderLabel,onSave}) {
+function TeamsPanel({teams,levels,onSave}) {
   const emptyMembers=()=>['','',''];
   const [list,setList]=useState(teams.map(t=>({...t,members:t.members&&t.members.length===3?[...t.members]:emptyMembers()})));
   const [val,setVal]=useState('');
@@ -406,7 +390,7 @@ function TeamsPanel({teams,levels,genderLabel,onSave}) {
   const unassigned=list.filter(x=>!x.level).length;
   const lvlPillS=(active)=>({padding:'4px 10px',background:active?GOLD+'14':'none',border:'1px solid '+(active?GOLD:BORDER_STRONG),borderRadius:5,color:active?GOLD:T5,cursor:'pointer',fontSize:10,fontWeight:700,whiteSpace:'nowrap'});
   return h('div',{style:{padding:16}},
-    h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'👥 Equipos · '+genderLabel),
+    h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'👥 Equipos'),
     h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Podés cargar el equipo sin definir la categoría y asignarla después con los botones de abajo.'+(unassigned?' · '+unassigned+' sin asignar':'')),
     h('div',{style:{display:'flex',gap:8,marginBottom:addError?6:14}},
       h('input',{value:val,onChange:e=>{setVal(e.target.value);setAddError('');},onKeyDown:e=>e.key==='Enter'&&add(),placeholder:'Nombre del equipo...',
@@ -478,7 +462,7 @@ function ScoresPanel({teams,scores,config,onUpdate}) {
   const ph       =(u)=>u==='tiempo'?'1:23':u==='kg'?'kg':u==='metros'?'metros':'reps';
   return h('div',{style:{padding:16}},
     h('div',{style:{fontSize:11,fontWeight:700,color:GOLD,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:4}},'📊 Carga de Resultados'),
-    h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Tiempos en MM:SS — Peso/Reps como número. La app rankea automáticamente.'),
+    h('p',{style:{fontSize:11,color:T5,marginBottom:14}},'Tiempos en MM:SS (ej. 3:45). La app rankea automáticamente.'),
     h('div',{style:{overflowX:'auto'}},
       h('table',{style:{width:'100%',borderCollapse:'collapse'}},
         h('thead',null,h('tr',null,
@@ -595,11 +579,10 @@ function ScheduleModal({items,onClose}) {
 
 // ── App ───────────────────────────────────────────────────
 function App() {
-  const [selLevel,setSelLevel]=useState('Participativa');
-  const [selGender,setSelGender]=useState('HHM');
+  const [selLevel,setSelLevel]=useState(LEVELS[0]);
   const [baseConfig,setBaseConfig]=useState(BASE_CONFIG);
-  const [teams,setTeams]=useState({});    // {gender: [{name, level:null|'Participativa'|'Competitiva'}]}
-  const [scores,setScores]=useState({});  // {catKey: {0:{},1:{},2:{},3:{}}}
+  const [teams,setTeams]=useState([]);    // [{name, level:null|'Chill'|'Picante', members}]
+  const [scores,setScores]=useState({});  // {nivel: {0:{equipo:tiempo},1:{},...}}
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [session,setSession]=useState(null);
@@ -621,11 +604,9 @@ function App() {
   const scheduleLocked = SCHEDULE_LOCK_ENABLED && sessionChecked && !isAdmin && now < SCHEDULE_LOCK_UNTIL.getTime();
   const publicHidden = sessionChecked && !isAdmin && siteHidden;
 
-  const curCat=selLevel+' '+selGender;
-  const genderTeams=teams[selGender]||[];               // todos los equipos de este género (cualquier categoría, incluso sin asignar)
-  const curTeams=genderTeams.filter(t=>t.level===selLevel).map(t=>t.name); // solo los ya asignados a la categoría actual
-  const teamMembers={}; genderTeams.forEach(t=>{ teamMembers[t.name]=t.members||[]; }); // nombre -> integrantes
-  const curScores=scores[curCat]||{};
+  const curTeams=teams.filter(t=>t.level===selLevel).map(t=>t.name); // solo los ya asignados a la categoría actual (los sin asignar no entran a ninguna tabla)
+  const teamMembers={}; teams.forEach(t=>{ teamMembers[t.name]=t.members||[]; }); // nombre -> integrantes
+  const curScores=scores[selLevel]||{};
   const config=baseConfig;
 
   // Sesión de admin: se restaura sola si ya había una guardada, y se mantiene
@@ -640,42 +621,29 @@ function App() {
   useEffect(()=>{
     async function loadAll(){
       setLoading(true);
-      const all=LEVELS.flatMap(l=>GENDERS.map(g=>l+' '+g));
       const results=await Promise.all([
-        dbGet('config').then(d=>['config',null,d]),
+        dbGet(CONFIG_KEY).then(d=>['config',null,d]),
+        dbGet('config').then(d=>['oldConfig',null,d]),
         dbGet('hidden').then(d=>['hidden',null,d]),
-        ...GENDERS.map(g=>dbGet('teams:'+g).then(d=>['teams',g,d])),
-        ...all.map(cat=>dbGet('scores:'+cat).then(d=>['scores',cat,d])),
+        dbGet(TEAMS_KEY).then(d=>['teams',null,d]),
+        ...LEVELS.map(l=>dbGet(scoresKey(l)).then(d=>['scores',l,d])),
       ]);
-      let cfg=null;
-      const newTeams={};const newScores={};
+      let cfg=null, oldCfg=null, newTeams=[];
+      const newScores={};
       results.forEach(([type,key,data])=>{
         if(type==='config'){ cfg=data; return; }
+        if(type==='oldConfig'){ oldCfg=data; return; }
         if(type==='hidden'){ setSiteHidden(!!data); return; }
         if(!data)return;
-        if(type==='teams') newTeams[key]=Array.isArray(data)?data:[];
+        if(type==='teams') newTeams=Array.isArray(data)?data:[];
         if(type==='scores') newScores[key]=data;
       });
 
-      // Migración: si un género todavía no tiene datos en el esquema nuevo
-      // (teams:<genero>), busca en el esquema viejo (teams:<nivel> <genero>)
-      // y lo junta en uno solo, con la categoría de cada equipo ya asignada.
-      // No borra las claves viejas, solo deja de leerlas de acá en más.
-      for (const g of GENDERS) {
-        if (newTeams[g] && newTeams[g].length) continue;
-        const legacyLists = await Promise.all(LEVELS.map(l=>dbGet('teams:'+l+' '+g)));
-        const merged=[];
-        LEVELS.forEach((l,i)=>{
-          const arr=legacyLists[i];
-          if(Array.isArray(arr)) arr.forEach(name=>{ if(name) merged.push({name, level:l}); });
-        });
-        if(merged.length){
-          newTeams[g]=merged;
-          await dbSet('teams:'+g, merged);
-        }
-      }
-
-      if(cfg)setBaseConfig(cfg);
+      // Config de estaciones: si todavía no se guardó ninguna, arranca con las
+      // 8 estaciones por defecto y solo hereda el nombre de la competencia
+      // anterior (la config vieja queda intacta en la base, no se lee más).
+      if(cfg) setBaseConfig(cfg);
+      else if(oldCfg&&oldCfg.name) setBaseConfig({...BASE_CONFIG,name:oldCfg.name});
       setTeams(newTeams);
       setScores(newScores);
       setLoading(false);
@@ -685,9 +653,9 @@ function App() {
 
   // saveTeams: guardado directo, devuelve promise para que TeamsPanel pueda hacer await
   const saveTeams=async(newList)=>{
-    setTeams(prev=>({...prev,[selGender]:newList}));
+    setTeams(newList);
     setSaving(true);
-    await dbSet('teams:'+selGender, newList);
+    await dbSet(TEAMS_KEY, newList);
     setSaving(false);
   };
 
@@ -698,18 +666,18 @@ function App() {
     const idx=curTeams.indexOf(name);
     const otherName=curTeams[idx+dir];
     if(!otherName) return;
-    const newGenderTeams=[...genderTeams];
-    const i1=newGenderTeams.findIndex(t=>t.name===name);
-    const i2=newGenderTeams.findIndex(t=>t.name===otherName);
-    [newGenderTeams[i1],newGenderTeams[i2]]=[newGenderTeams[i2],newGenderTeams[i1]];
-    saveTeams(newGenderTeams);
+    const newTeams=[...teams];
+    const i1=newTeams.findIndex(t=>t.name===name);
+    const i2=newTeams.findIndex(t=>t.name===otherName);
+    [newTeams[i1],newTeams[i2]]=[newTeams[i2],newTeams[i1]];
+    saveTeams(newTeams);
   };
 
   // saveConfig: guardado directo, devuelve promise para que ConfigPanel pueda hacer await
   const saveConfig=async(cfg)=>{
     setBaseConfig(cfg);
     setSaving(true);
-    await dbSet('config',cfg);
+    await dbSet(CONFIG_KEY,cfg);
     setSaving(false);
   };
 
@@ -726,9 +694,9 @@ function App() {
 
   // updateScore: debounce mientras tipea
   const updateScore=(ei,team,val)=>{
-    const key='scores:'+curCat;
+    const key=scoresKey(selLevel);
     const newScoresCat={...curScores,[String(ei)]:{...((curScores[String(ei)]||curScores[ei])||{}),[team]:val}};
-    setScores(prev=>({...prev,[curCat]:newScoresCat}));
+    setScores(prev=>({...prev,[selLevel]:newScoresCat}));
     setSaving(true);
     clearTimeout(scoreTimer.current[key]);
     scoreTimer.current[key]=setTimeout(async()=>{
@@ -761,7 +729,7 @@ function App() {
     try{
       await dbDeleteTeams();
       await dbDeleteScores();
-      setTeams({});
+      setTeams([]);
       setScores({});
     }catch(e){
       alert('Error al borrar equipos: '+e.message);
@@ -784,7 +752,6 @@ function App() {
   const lb=calcLeaderboard(curTeams,curScores,config);
 
   const lvlS=(l)=>({padding:'8px 16px',background:selLevel===l?GOLD+'14':'none',border:'1px solid '+(selLevel===l?GOLD:BORDER),borderRadius:6,color:selLevel===l?GOLD:T5,cursor:'pointer',fontSize:12,fontWeight:700,letterSpacing:'0.06em',whiteSpace:'nowrap'});
-  const gdrS=(g)=>({flex:1,padding:'8px 0',background:selGender===g?SURFACE_ALT:'none',border:'1px solid '+(selGender===g?BORDER_STRONG:'transparent'),borderRadius:6,color:selGender===g?T2:T6,cursor:'pointer',fontSize:12,fontWeight:600});
   const atS =(t)=>({padding:'7px 14px',background:aTab===t?ACCENT+'14':'none',border:'1px solid '+(aTab===t?ACCENT:BORDER),borderRadius:6,color:aTab===t?ACCENT:T5,cursor:'pointer',fontSize:11,fontWeight:600,letterSpacing:'0.04em'});
 
   return h('div',{style:{minHeight:'100vh',display:'flex',flexDirection:'column'}},
@@ -797,7 +764,7 @@ function App() {
       h('div',{style:{background:SURFACE,border:'1px solid #FCA5A5',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
         h('div',{style:{fontSize:36,marginBottom:12}},'⚠️'),
         h('h3',{style:{color:'#B91C1C',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Limpiar todos los resultados'),
-        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar los resultados de ',h('strong',{style:{color:T1}},'Participativa y Competitiva'),' de forma permanente (las categorías ocultas no se tocan). Los equipos no se borran.'),
+        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar los resultados de ',h('strong',{style:{color:T1}},'Chill y Picante'),' de forma permanente (los de competencias anteriores no se tocan). Los equipos no se borran.'),
         h('div',{style:{display:'flex',gap:10}},
           h('button',{onClick:()=>setShowConfirm(false),style:{flex:1,padding:'11px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
           h('button',{onClick:handleClearScores,disabled:clearing,style:{flex:1,padding:'11px',background:'#DC2626',border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},
@@ -812,7 +779,7 @@ function App() {
       h('div',{style:{background:SURFACE,border:'1px solid #FCA5A5',borderRadius:12,padding:28,width:'min(360px,92%)',textAlign:'center',boxShadow:'0 12px 32px rgba(23,26,31,0.14)'}},
         h('div',{style:{fontSize:36,marginBottom:12}},'⚠️'),
         h('h3',{style:{color:'#B91C1C',fontSize:15,fontWeight:700,margin:'0 0 8px'}},'Borrar todos los equipos'),
-        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar ',h('strong',{style:{color:T1}},'todos los equipos de Participativa y Competitiva'),' de forma permanente, junto con sus resultados (las categorías ocultas no se tocan). Esta acción no se puede deshacer.'),
+        h('p',{style:{color:T3,fontSize:13,marginBottom:20,lineHeight:1.5}},'Se van a eliminar ',h('strong',{style:{color:T1}},'todos los equipos de Chill y Picante'),' de forma permanente, junto con sus resultados (los de competencias anteriores no se tocan). Esta acción no se puede deshacer.'),
         h('div',{style:{display:'flex',gap:10}},
           h('button',{onClick:()=>setShowConfirmTeams(false),style:{flex:1,padding:'11px',background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:8,color:T4,cursor:'pointer',fontSize:13}},'Cancelar'),
           h('button',{onClick:handleClearTeams,disabled:clearingTeams,style:{flex:1,padding:'11px',background:'#DC2626',border:'none',borderRadius:8,color:'white',cursor:'pointer',fontSize:13,fontWeight:700}},
@@ -848,17 +815,14 @@ function App() {
             :h('button',{onClick:()=>setShowLogin(true),style:{background:'none',border:'1px solid '+BORDER_STRONG,borderRadius:6,color:T5,cursor:'pointer',fontSize:11,padding:'7px 14px',letterSpacing:'0.07em'}},'ADMIN')
         )
       ),
-      h('div',{style:{display:'flex',gap:6,marginBottom:8,overflowX:'auto'}},
+      h('div',{style:{display:'flex',gap:6,overflowX:'auto'}},
         LEVELS.map(l=>h('button',{key:l,onClick:()=>setSelLevel(l),style:lvlS(l)},l))
-      ),
-      h('div',{style:{display:'flex',gap:4}},
-        GENDERS.map(g=>h('button',{key:g,onClick:()=>setSelGender(g),style:gdrS(g)},g+' · '+GENDER_LABELS[g]))
       )
     ),
 
     h('div',{style:{padding:'10px 16px',background:SURFACE_ALT,borderBottom:'1px solid '+BORDER,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:6}},
       h('div',{style:{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}},
-        h('span',{style:{fontSize:15,fontWeight:800,color:T2,letterSpacing:'0.04em'}},curCat),
+        h('span',{style:{fontSize:15,fontWeight:800,color:T2,letterSpacing:'0.04em'}},selLevel),
         h('span',{style:{fontSize:11,color:T6}},curTeams.length+' equipos')
       ),
       lb.length>0&&h('span',{style:{fontSize:9,color:GOLD,letterSpacing:'0.09em',fontWeight:700}},'CLASIFICACIÓN EN VIVO')
@@ -876,14 +840,14 @@ function App() {
         h('button',{onClick:()=>setATab('scores'),style:atS('scores')},'📊 Resultados'),
         h('button',{onClick:()=>setATab('config'),style:atS('config')},'⚙ Config')
       ),
-      aTab==='teams' &&h(TeamsPanel, {key:'t-'+selGender,teams:genderTeams,levels:LEVELS,genderLabel:selGender+' · '+GENDER_LABELS[selGender],onSave:saveTeams}),
-      aTab==='scores'&&h(ScoresPanel,{key:'s-'+curCat,teams:curTeams,scores:curScores,config,onUpdate:updateScore}),
+      aTab==='teams' &&h(TeamsPanel, {key:'teams',teams,levels:LEVELS,onSave:saveTeams}),
+      aTab==='scores'&&h(ScoresPanel,{key:'s-'+selLevel,teams:curTeams,scores:curScores,config,onUpdate:updateScore}),
       aTab==='config'&&h(ConfigPanel,{config:baseConfig,onSave:saveConfig})
     ),
 
     h('div',{style:{padding:'8px 16px',borderTop:'1px solid '+BORDER_SOFT,display:'flex',justifyContent:'space-between',alignItems:'center'}},
       h('span',{style:{fontSize:9,color:T7,letterSpacing:'0.08em'}},'Menor puntaje = mejor posición · Empates comparten rango'),
-      h('span',{style:{fontSize:9,color:T7}},(LEVELS.length*GENDERS.length)+' categorías')
+      h('span',{style:{fontSize:9,color:T7}},LEVELS.length+' categorías')
     )
   );
 }
